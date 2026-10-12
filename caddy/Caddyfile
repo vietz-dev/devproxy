@@ -1,0 +1,11 @@
+{
+	admin 127.0.0.1:2019
+	local_certs
+	default_bind 127.0.0.1
+	auto_https disable_redirects
+}
+
+https://devproxy.localhost {
+	tls internal
+	respond "Start devproxy serve to open the dashboard" 503
+}
