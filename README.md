@@ -20,6 +20,22 @@ go build -o bin/devproxy ./cmd/devproxy
 `bin/devproxy` is the only program a project needs for registration. It has no
 Node.js or pnpm runtime dependency.
 
+## Install the agent skill in a project
+
+The skill in `skills/devproxy/SKILL.md` tells an agent how to start a project
+that uses devproxy, find its URL, and list active services. From the project
+that will use devproxy, install the skill with the
+[`skills` CLI](https://skills.sh/docs):
+
+```sh
+npx skills add /absolute/path/to/devproxy --skill devproxy
+```
+
+Select the agent you use when the CLI asks. The skill is installed in that
+project, so new agent sessions can use it. Once this repository is published
+at `github.com/vietz-dev/devproxy`, use
+`npx skills add vietz-dev/devproxy --skill devproxy` instead.
+
 ## Start Caddy once
 
 `devproxy serve` requires a **dedicated Caddy instance** whose admin endpoint
@@ -96,15 +112,10 @@ restarts, running clients register again on their next heartbeat.
 
 ## Kasta example
 
-Build the binary in this repository, then run this from the Kasta root in
-another terminal after starting Caddy and `devproxy serve`:
-
-```sh
-tools/with-env.sh ./devproxy/bin/devproxy run --project kasta --url-env NEXT_PUBLIC_APP_URL web -- pnpm --dir apps/web exec next dev -p '{port}'
-```
-
-The existing `pnpm dev` command still uses Portless. The example above lets
-you try devproxy without changing Kasta's development scripts.
+Install the binary on your `PATH`. After starting Caddy and `devproxy serve`,
+run `pnpm dev` from the Kasta root. Its web script registers the worktree and
+sets `NEXT_PUBLIC_APP_URL` automatically. Open
+`https://kasta-<worktree-folder>.localhost`.
 
 ## Current limits
 
