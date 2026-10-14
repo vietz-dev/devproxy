@@ -1,0 +1,28 @@
+---
+title: Troubleshooting
+description: Diagnose daemon, Caddy, certificate, and service startup issues.
+---
+
+## `devproxy list` cannot reach the daemon
+
+Start the dedicated Caddy instance, then run `devproxy serve` in a terminal. The control API listens on `127.0.0.1:7654` by default. If you changed its address, pass the matching `--daemon` option to `run`, `register`, and `list`.
+
+## `serve` cannot connect to Caddy
+
+Make sure the dedicated Caddy instance is running and its admin API is reachable at `http://127.0.0.1:2019`. Check that another proxy is not using ports 443 or 2019. Start Caddy before `serve`. The daemon must own this Caddy instance's configuration.
+
+## Browser reports an untrusted certificate
+
+Caddy uses its local certificate authority for `.localhost` HTTPS. Follow the [macOS trust steps](/docs/getting-started#trust-local-https), or trust that root certificate in your Linux system or browser. The authority is kept in the Compose volume, so restarting Caddy normally does not change it.
+
+## `run` says the service did not start listening
+
+The child has 60 seconds by default to open its allocated port on `127.0.0.1`. Ensure it reads `PORT` or uses the substituted `{port}` argument. Increase `--ready-timeout` if startup takes longer. devproxy does not change application port settings beyond the environment variable and argument substitution.
+
+## `register` says the service is not listening
+
+Start the service first and verify its port is reachable on `127.0.0.1`. If it runs in Docker, publish its HTTP port to the host. Then run `register --port` with that host port.
+
+## Registration conflicts or a URL is missing
+
+Run `devproxy list` to inspect active routes. A second registration for the same hostname and path prefix is rejected. Use another `--worktree` name or `--route`. Keep the `run` or `register` command running; its registration disappears on exit or expires after 20 seconds without heartbeats.
