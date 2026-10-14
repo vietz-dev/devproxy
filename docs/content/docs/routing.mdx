@@ -1,0 +1,27 @@
+---
+title: Routes and URLs
+description: Understand worktree hostnames, path prefixes, and registration leases.
+---
+
+## Worktree hostnames
+
+A registration is served at `https://<project>-<worktree>.localhost`. The project name stays the same across worktrees. By default, the worktree name comes from the Git checkout's root folder. devproxy lowercases that folder name, replaces runs of nonletters or nondigits with `-`, and trims leading or trailing `-`. You can supply `--worktree NAME` explicitly.
+
+The combined `<project>-<worktree>` must be one valid DNS label of at most 63 characters. The project name itself must use lowercase letters, digits, and internal hyphens. Two checkouts with the same project and worktree name cannot register the same route at once.
+
+## Share one origin across services
+
+Give services the same project and worktree name, then assign distinct path prefixes:
+
+```sh
+devproxy run --project example --route /api api -- my-api --port '{port}'
+devproxy run --project example --route / web -- my-web --port '{port}'
+```
+
+The API receives `/api` and paths below `/api`; the web service handles everything else. Prefixes are preserved when forwarded, so the upstream API must serve paths that include `/api`. Longer matching prefixes win: a `/api/admin` route takes priority over `/api`. Caddy forwards WebSocket upgrades for development hot reloads.
+
+Routes must be `/` or a slash followed by path segments made from letters, digits, `_`, or `-`. A route such as `/api/` with a trailing slash is invalid; use `/api`. Caddy returns 404 when no route matches.
+
+## Registration lifetime
+
+`run` and `register` renew their registrations every 5 seconds. Each registration expires after 20 seconds without a heartbeat. Normal shutdown unregisters it immediately. If the daemon restarts, running clients register again on their next heartbeat. The daemon periodically reloads Caddy's configuration and retries after a later Caddy restart.
