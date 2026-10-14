@@ -1,0 +1,61 @@
+---
+title: CLI reference
+description: devproxy commands, options, and child process environment.
+---
+
+## `serve`
+
+```sh
+devproxy serve [--listen 127.0.0.1:7654] [--caddy-admin http://127.0.0.1:2019]
+```
+
+Runs the local dashboard and control API. Start the dedicated Caddy instance first. The control listener must use `127.0.0.1`; its default port is `7654`. `--caddy-admin` points to Caddy's local HTTP admin origin.
+
+## `run`
+
+```sh
+devproxy run --project PROJECT [--worktree NAME] [--route /api] [--url-env APP_URL] [--ready-timeout 60s] [--daemon http://127.0.0.1:7654] SERVICE -- COMMAND [ARGS...]
+```
+
+Starts a child command on an available port. The child must listen on that port, either by reading `PORT` or by accepting a `{port}` argument. `run` waits up to 60 seconds by default for a TCP listener on `127.0.0.1`, then registers the service. If startup or registration fails, it stops the child. On exit, it removes the registration.
+
+```sh
+devproxy run --project kasta --url-env NEXT_PUBLIC_APP_URL web -- next dev -p '{port}'
+```
+
+The child receives:
+
+| Variable | Value |
+| --- | --- |
+| `PORT` | Chosen free port. |
+| `DEVPROXY_URL` | Public origin, such as `https://kasta-feature-login.localhost`. |
+| Variable named by `--url-env` | Same public origin, when requested. |
+
+`{port}` is replaced in each command argument. The service must accept the allocated port; devproxy does not change its own configuration.
+
+## `register`
+
+```sh
+devproxy register --project PROJECT --port PORT [--worktree NAME] [--route /api] [--daemon http://127.0.0.1:7654] SERVICE
+```
+
+Registers a service already listening on `127.0.0.1:PORT`. Use this for an API, frontend, nginx, or a container whose HTTP port is published to the host. Leave `register` running while the service needs its URL.
+
+## `list`
+
+```sh
+devproxy list [--daemon http://127.0.0.1:7654]
+```
+
+Prints the URL, route, service name, and local host port of every active registration on this machine. Use `--daemon` if the daemon runs at a nondefault address.
+
+## Shared service flags
+
+| Flag | Meaning |
+| --- | --- |
+| `--project` | Required stable name shared by a project's worktrees. |
+| `--worktree` | Instance name; defaults to the Git checkout's root folder name. |
+| `--route` | Path prefix, default `/`. |
+| `--daemon` | Control API origin, default `http://127.0.0.1:7654`. |
+
+Pass flags **before** `SERVICE`. `run` also needs `--` before the child command. See [Routes and URLs](/docs/routing) for naming and path rules.

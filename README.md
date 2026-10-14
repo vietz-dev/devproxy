@@ -9,6 +9,10 @@ This is an early local development tool. It currently targets macOS and Linux
 with services running on the host. A service inside Docker can also be
 registered when its HTTP port is published to the host.
 
+The [developer documentation](docs/README.md) covers setup, CLI commands,
+routing, troubleshooting, and contributing. Run it locally from `docs/` with
+`npm install` and `npm run dev`, then open <http://localhost:3000/docs>.
+
 ## Build
 
 Go 1.24 or newer is required to build the binary:

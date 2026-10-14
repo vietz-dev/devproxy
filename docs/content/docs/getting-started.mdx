@@ -1,0 +1,64 @@
+---
+title: Getting started
+description: Build devproxy, start its dedicated Caddy instance, and register a service.
+---
+
+## Prerequisites
+
+- Go 1.24 or newer to build the CLI.
+- Docker with host networking for the included Caddy Compose setup, or a native Caddy installation.
+- A service that listens on a host TCP port. Containerized services must publish that port to the host.
+
+The CLI binary has no Node.js or pnpm runtime dependency. Node.js is needed only to develop this documentation site.
+
+## Build the CLI
+
+From the devproxy repository:
+
+```sh
+go build -o bin/devproxy ./cmd/devproxy
+```
+
+Use `bin/devproxy` in the commands below, or put the binary on your `PATH` and use `devproxy`.
+
+## Start Caddy and the daemon
+
+devproxy requires a **dedicated** Caddy instance with its admin endpoint at `http://127.0.0.1:2019`. The daemon owns that instance's configuration. Caddy also needs port 443, so stop any other local proxy using it first.
+
+```sh
+docker compose -f caddy/compose.yml up -d
+bin/devproxy serve
+```
+
+Keep `serve` running. The included Compose file uses host networking so Caddy can reach services bound to `127.0.0.1`. On Linux, this works with Docker Engine. On macOS, OrbStack supports host networking; Docker Desktop requires **Host networking** to be enabled in its network settings. You can also run Caddy natively with the included `caddy/Caddyfile`.
+
+Open `https://devproxy.localhost` for the dashboard. If your browser does not yet trust Caddy's local certificate, follow [Trust local HTTPS](#trust-local-https).
+
+## Register a development service
+
+Run this from the service's Git worktree. `--project` is a stable project name; the worktree folder supplies the instance name.
+
+```sh
+bin/devproxy run --project example web -- next dev -p '{port}'
+```
+
+`run` picks a free port, sets `PORT` and `DEVPROXY_URL`, replaces `{port}` in command arguments, waits for the port to listen, and registers its route. Keep the command running while you need the URL. Open `https://example-<worktree-folder>.localhost`.
+
+For a service that is already listening on port 3001, keep a separate registration command running:
+
+```sh
+bin/devproxy register --project example --port 3001 api
+```
+
+Check active URLs with `bin/devproxy list` or the dashboard. See [CLI reference](/docs/cli) for all flags and [Routes and URLs](/docs/routing) for multiple services on one origin.
+
+## Trust local HTTPS
+
+The Compose volume retains Caddy's local certificate authority across restarts. On macOS, after Caddy has served its first HTTPS request, copy and trust the root certificate:
+
+```sh
+docker compose -f caddy/compose.yml cp caddy:/data/caddy/pki/authorities/local/root.crt ./devproxy-root.crt
+security add-trusted-cert -d -r trustRoot -k "$HOME/Library/Keychains/login.keychain-db" ./devproxy-root.crt
+```
+
+The trust command may ask for your macOS password. On Linux, add the copied root certificate to your system or browser trust store using your distribution's process. The copied certificate is ignored by this repository's Git configuration.
