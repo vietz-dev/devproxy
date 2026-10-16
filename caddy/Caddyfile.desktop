@@ -1,0 +1,11 @@
+{
+	admin 0.0.0.0:2019
+	local_certs
+	default_bind 0.0.0.0
+	auto_https disable_redirects
+}
+
+https://devproxy.localhost {
+	tls internal
+	respond "Start devproxy serve --docker-desktop to open the dashboard" 503
+}

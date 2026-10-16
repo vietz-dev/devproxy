@@ -2,11 +2,12 @@ package devproxy
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,6 +18,17 @@ import (
 	"sync"
 	"time"
 )
+
+//go:embed web/dist
+var dashboardAssets embed.FS
+
+var dashboardFiles = func() fs.FS {
+	files, err := fs.Sub(dashboardAssets, "web/dist")
+	if err != nil {
+		panic(err)
+	}
+	return files
+}()
 
 const LeaseDuration = 20 * time.Second
 
@@ -57,13 +69,17 @@ func NewServer(adminURL, listen, upstreamHost string) (*Server, error) {
 	if _, _, err := net.SplitHostPort(listen); err != nil {
 		return nil, fmt.Errorf("invalid listen address: %w", err)
 	}
-	if upstreamHost != "127.0.0.1" && upstreamHost != "localhost" {
-		return nil, errors.New("upstream host must be 127.0.0.1 or localhost")
+	if upstreamHost != "127.0.0.1" && upstreamHost != "localhost" && upstreamHost != "host.docker.internal" {
+		return nil, errors.New("upstream host must be 127.0.0.1, localhost, or host.docker.internal")
+	}
+	adminListen := parsed.Host
+	if upstreamHost == "host.docker.internal" {
+		adminListen = net.JoinHostPort("0.0.0.0", parsed.Port())
 	}
 	return &Server{
 		services:     make(map[string]Service),
 		adminURL:     strings.TrimRight(adminURL, "/"),
-		adminListen:  parsed.Host,
+		adminListen:  adminListen,
 		listen:       listen,
 		upstreamHost: upstreamHost,
 		client:       &http.Client{Timeout: 10 * time.Second},
@@ -87,6 +103,7 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.dashboard)
+	mux.Handle("GET /assets/", http.FileServerFS(dashboardFiles))
 	mux.HandleFunc("GET /v1/services", s.list)
 	mux.HandleFunc("POST /v1/register", s.register)
 	mux.HandleFunc("POST /v1/heartbeat", s.heartbeat)
@@ -219,14 +236,8 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.mu.Lock()
-	services := s.sortedServices()
-	s.mu.Unlock()
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := dashboardTemplate.Execute(w, services); err != nil {
-		slog.Error("render dashboard", "error", err)
-	}
+	http.ServeFileFS(w, r, dashboardFiles, "index.html")
 }
 
 func (s *Server) sortedServices() []Service {
@@ -264,9 +275,13 @@ func (s *Server) syncCaddy(ctx context.Context) error {
 
 func renderCaddyfile(services []Service, listen, upstreamHost, adminListen string) string {
 	_, port, _ := net.SplitHostPort(listen)
+	bindHost := "127.0.0.1"
+	if upstreamHost == "host.docker.internal" {
+		bindHost = "0.0.0.0"
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "{\n\tadmin %s\n\tlocal_certs\n\tdefault_bind 127.0.0.1\n\tauto_https disable_redirects\n}\n\n", adminListen)
-	fmt.Fprintf(&b, "https://devproxy.localhost {\n\ttls internal\n\troute {\n\t\thandle / {\n\t\t\treverse_proxy %s:%s\n\t\t}\n\t\trespond 404\n\t}\n}\n", upstreamHost, port)
+	fmt.Fprintf(&b, "{\n\tadmin %s\n\tlocal_certs\n\tdefault_bind %s\n\tauto_https disable_redirects\n}\n\n", adminListen, bindHost)
+	fmt.Fprintf(&b, "https://devproxy.localhost {\n\ttls internal\n\troute {\n\t\t@dashboard {\n\t\t\tpath /\n\t\t\tmethod GET\n\t\t}\n\t\t@assets {\n\t\t\tpath /assets/*\n\t\t\tmethod GET\n\t\t}\n\t\t@services {\n\t\t\tpath /v1/services\n\t\t\tmethod GET\n\t\t}\n\t\thandle @dashboard {\n\t\t\treverse_proxy %s:%s\n\t\t}\n\t\thandle @assets {\n\t\t\treverse_proxy %s:%s\n\t\t}\n\t\thandle @services {\n\t\t\treverse_proxy %s:%s\n\t\t}\n\t\trespond 404\n\t}\n}\n", upstreamHost, port, upstreamHost, port, upstreamHost, port)
 	for start := 0; start < len(services); {
 		end := start + 1
 		for end < len(services) && services[end].Host == services[start].Host {
@@ -339,11 +354,3 @@ func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
 }
-
-var dashboardTemplate = template.Must(template.New("dashboard").Parse(`<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="5">
-<title>devproxy</title>
-<style>body{font:16px system-ui,sans-serif;max-width:900px;margin:5rem auto;padding:0 1.5rem;color:#202124;background:#f7f7f5}h1{font-size:2.4rem;margin-bottom:.2rem}p{color:#555}main{display:grid;gap:1rem;margin-top:2rem}article{background:#fff;border:1px solid #ddd;border-radius:12px;padding:1.1rem 1.3rem}article a{font-size:1.2rem;font-weight:650;color:#075caa}small{display:block;color:#666;margin-top:.4rem}code{background:#f1f1ee;padding:.1rem .3rem;border-radius:4px}</style>
-<body><h1>devproxy</h1><p>Local services registered from your worktrees. Refreshes every 5 seconds.</p><main>
-{{range .}}<article><a href="{{.URL}}">{{.Project}} / {{.Worktree}}</a><small>{{.Service}} · <code>{{.Route}}</code> · port {{.Port}}</small></article>{{else}}<article>No services registered yet. Start one with <code>devproxy run</code>.</article>{{end}}
-</main></body></html>`))

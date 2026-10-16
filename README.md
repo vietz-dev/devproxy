@@ -13,16 +13,24 @@ The [developer documentation](docs/README.md) covers setup, CLI commands,
 routing, troubleshooting, and contributing. Run it locally from `docs/` with
 `npm install` and `npm run dev`, then open <http://localhost:3000/docs>.
 
+The [Kata-informed architecture and roadmap](docs/KATA_ROADMAP.md) describes
+the planned CLI-first, agent-friendly control model and React operator UI.
+
 ## Build
 
-Go 1.24 or newer is required to build the binary:
+Go 1.24 or newer, Node.js 22 or newer, npm, and Just are required to rebuild
+the dashboard and binary together:
 
 ```sh
-go build -o bin/devproxy ./cmd/devproxy
+just build
 ```
 
+`just build` installs the locked frontend dependencies, rebuilds the embedded
+dashboard, and writes `bin/devproxy`. For a Go-only build from the checked-in
+dashboard assets, run `just go`. Run `just test` for the Go test suite.
+
 `bin/devproxy` is the only program a project needs for registration. It has no
-Node.js or pnpm runtime dependency.
+Node.js or npm runtime dependency.
 
 ## Install the agent skill in a project
 
@@ -48,23 +56,32 @@ do not point it at a Caddy instance serving unrelated sites. Caddy also needs
 access to ports 443 and 2019. Stop any per-project Caddy or Portless service
 using 443 first.
 
-The included Compose file runs Caddy with host networking so it can reach
-development processes bound to `127.0.0.1`. On Linux, host networking works
-with Docker Engine. OrbStack supports it on macOS; for Docker Desktop, enable
-**Host networking** in its network settings first. Then run:
+On Docker Desktop for macOS, use the bridge Compose setup. It publishes ports
+443 and 2019 only on the host loopback address. Caddy reaches host services
+through `host.docker.internal`:
+
+```sh
+just serve-desktop
+```
+
+This recipe builds the Go binary, starts Caddy, and keeps `devproxy serve`
+running in the terminal. If an older host-network Caddy container is already
+running, Compose replaces it while preserving its certificate volume.
+
+On Linux Docker Engine or macOS OrbStack, use the host-network Compose setup:
 
 ```sh
 docker compose -f caddy/compose.yml up -d
 bin/devproxy serve
 ```
 
-Keep `devproxy serve` running in a terminal for now. Open
+Keep `devproxy serve` running in a terminal. Open
 <https://devproxy.localhost> for the dashboard. The Compose volume preserves
 Caddy's local certificate authority across restarts. To trust its root on
-macOS, after Caddy has served the first HTTPS request:
+macOS with Docker Desktop, after Caddy has served the first HTTPS request:
 
 ```sh
-docker compose -f caddy/compose.yml cp caddy:/data/caddy/pki/authorities/local/root.crt ./devproxy-root.crt
+docker compose -f caddy/compose.desktop.yml cp caddy:/data/caddy/pki/authorities/local/root.crt ./devproxy-root.crt
 security add-trusted-cert -d -r trustRoot -k "$HOME/Library/Keychains/login.keychain-db" ./devproxy-root.crt
 ```
 
