@@ -6,10 +6,10 @@ description: devproxy commands, options, and child process environment.
 ## `serve`
 
 ```sh
-devproxy serve [--listen 127.0.0.1:7654] [--caddy-admin http://127.0.0.1:2019]
+devproxy serve [--listen 127.0.0.1:7654] [--caddy-admin http://127.0.0.1:2019] [--docker-desktop]
 ```
 
-Runs the local dashboard and control API. Start the dedicated Caddy instance first. The control listener must use `127.0.0.1`; its default port is `7654`. `--caddy-admin` points to Caddy's local HTTP admin origin.
+Runs the local dashboard and control API. Start the dedicated Caddy instance first. The control listener must use `127.0.0.1`; its default port is `7654`. `--caddy-admin` points to Caddy's local HTTP admin origin. Use `--docker-desktop` with `caddy/compose.desktop.yml` on Docker Desktop for macOS; it makes Caddy reach host services through `host.docker.internal`.
 
 ## `run`
 
@@ -44,10 +44,20 @@ Registers a service already listening on `127.0.0.1:PORT`. Use this for an API, 
 ## `list`
 
 ```sh
-devproxy list [--daemon http://127.0.0.1:7654]
+devproxy list [--json] [--daemon http://127.0.0.1:7654]
 ```
 
 Prints the URL, route, service name, and local host port of every active registration on this machine. Use `--daemon` if the daemon runs at a nondefault address.
+
+Use `--json` for scripts and agents. It emits one JSON array of active registrations, including each registration's `id`, `project`, `worktree`, `service`, `route`, `port`, `host`, `url`, and `expires_at`. An empty list is `[]`.
+
+## `inspect`
+
+```sh
+devproxy inspect [--json] [--route /api] [--daemon http://127.0.0.1:7654] ID|HOST|URL
+```
+
+Shows one active registration with its ID, project, worktree, service, URL, host, route, local port, and lease expiration. Pass the ID from `list --json`, a hostname such as `example-feature.localhost`, or a service URL such as `https://example-feature.localhost`. When several routes share a hostname or URL, select one with `--route` or use its ID. `--json` emits one registration object with the same fields as `list --json`. A missing or ambiguous registration returns an error.
 
 ## Shared service flags
 

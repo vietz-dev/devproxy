@@ -10,16 +10,22 @@ This project uses `devproxy` for local HTTPS URLs. One Caddy instance handles HT
 ## Start or find the project
 
 1. Find the project's documented development command. Run that command so its `devproxy` wrapper chooses a free port and registers the service. Keep the command running while the user needs the project.
-2. Run `devproxy list` to see active URLs, routes, service names, and local ports. The list covers every project on this machine. Match the project name from its script to the relevant entry. The dashboard is at `https://devproxy.localhost`.
+2. Run `devproxy list --json` to get active URLs, routes, service names, local ports, registration IDs, and lease expiry as structured data. Match the project name from its script to the relevant entry. Use `devproxy list` when a human-readable table is enough. The dashboard is at `https://devproxy.localhost`.
 3. Give the user the registered HTTPS URL when you report that the project is ready. Use the URL from `devproxy list` or the wrapper's output.
 
-If `devproxy` is missing, use the project's setup instructions to install the binary. If `devproxy list` cannot reach the daemon, use the project's setup instructions for the shared Caddy and `devproxy serve` processes. If HTTPS shows a certificate warning, follow those instructions to trust Caddy's local root certificate.
+If `devproxy` is missing, use the project's setup instructions to install the binary. If `devproxy list` cannot reach the daemon, use the project's setup instructions for the shared Caddy and `devproxy serve` processes. On Docker Desktop for macOS, use `just serve-desktop`; the host-network Compose file does not work unless Docker Desktop host networking is enabled. If HTTPS shows a certificate warning, follow the setup instructions to trust Caddy's local root certificate.
 
 ## CLI reference
 
 - `devproxy list` shows current registrations. A stopped service disappears when it unregisters or its registration expires.
+- `devproxy list --json` emits the same registrations as JSON for scripts and agents. Use `devproxy inspect --json ID` when you need one registration's details.
 - `devproxy serve` runs the local control server and dashboard. It needs the dedicated Caddy admin endpoint at `http://127.0.0.1:2019` by default.
 - `devproxy run --project NAME SERVICE -- COMMAND [ARGS...]` starts a command on a free port and registers it. It sets `PORT` and `DEVPROXY_URL` for the child. Use `{port}` in an argument when the command needs an explicit port. Use `--url-env VARIABLE` to set another origin variable for the child.
 - `devproxy register --project NAME --port PORT SERVICE` registers an existing service whose port is available on the host. Keep this command running while the service needs its URL.
 
 `run` and `register` use the Git checkout folder as the default instance name. The resulting URL is `https://<project>-<folder>.localhost`. Use `--worktree NAME` before `SERVICE` when the folder name is ambiguous. Use `--route /path` before `SERVICE` to register one path prefix on a shared project URL. Read `devproxy --help` for the current command syntax.
+
+The registration's lease expiry shows that the wrapper is still renewing it. It
+does not prove that the application returns successful HTTP responses. If the
+URL fails, inspect the wrapped process and Caddy as the project's setup guide
+describes.
