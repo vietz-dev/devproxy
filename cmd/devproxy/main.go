@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -33,29 +32,7 @@ func main() {
 		signalRelay()
 		return
 	}
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
-	}
-	var err error
-	switch os.Args[1] {
-	case "serve":
-		err = serve(os.Args[2:])
-	case "run":
-		err = run(os.Args[2:])
-	case "register":
-		err = register(os.Args[2:])
-	case "list":
-		err = list(os.Args[2:])
-	case "inspect":
-		err = inspect(os.Args[2:])
-	case "help", "--help", "-h":
-		usage()
-		return
-	default:
-		usage()
-		os.Exit(2)
-	}
+	err := newRootCommand().Execute()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "devproxy:", err)
 		var exit interface{ ExitCode() int }
@@ -66,65 +43,22 @@ func main() {
 	}
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, `Usage:
-  devproxy serve [--listen 127.0.0.1:7654] [--caddy-admin http://127.0.0.1:2019] [--docker-desktop]
-  devproxy run --project PROJECT [--route /api] [--url-env APP_URL] SERVICE -- COMMAND [ARGS...]
-  devproxy register --project PROJECT --port PORT [--route /api] SERVICE
-  devproxy list [--json]
-  devproxy inspect [--json] [--route /api] ID|HOST|URL
-
-Run and register derive the worktree name from the current git checkout.
-The run command sets PORT and replaces {port} in command arguments.`)
-}
-
-func serve(args []string) error {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	listen := fs.String("listen", "127.0.0.1:7654", "local control and dashboard address")
-	admin := fs.String("caddy-admin", "http://127.0.0.1:2019", "Caddy admin API origin")
-	dockerDesktop := fs.Bool("docker-desktop", false, "connect to Caddy in the Docker Desktop bridge setup")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 0 {
-		return errors.New("serve does not accept positional arguments")
-	}
-	host, _, err := net.SplitHostPort(*listen)
+func serve(listen, admin string, dockerDesktop bool) error {
+	host, _, err := net.SplitHostPort(listen)
 	if err != nil || host != "127.0.0.1" {
 		return errors.New("serve must listen on 127.0.0.1")
 	}
 	upstreamHost := "127.0.0.1"
-	if *dockerDesktop {
+	if dockerDesktop {
 		upstreamHost = "host.docker.internal"
 	}
-	server, err := devproxy.NewServer(*admin, *listen, upstreamHost)
+	server, err := devproxy.NewServer(admin, listen, upstreamHost)
 	if err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return server.Serve(ctx)
-}
-
-type serviceFlags struct {
-	project  *string
-	worktree *string
-	route    *string
-	daemon   *string
-	port     *int
-}
-
-func addServiceFlags(fs *flag.FlagSet, withPort bool) serviceFlags {
-	f := serviceFlags{
-		project:  fs.String("project", "", "stable project name"),
-		worktree: fs.String("worktree", "", "worktree name (defaults to git root folder)"),
-		route:    fs.String("route", "/", "HTTP path prefix"),
-		daemon:   fs.String("daemon", defaultDaemon, "devproxy daemon origin"),
-	}
-	if withPort {
-		f.port = fs.Int("port", 0, "already-running service port")
-	}
-	return f
 }
 
 func registrationFromFlags(f serviceFlags, name string, port int) (devproxy.Registration, error) {
@@ -161,39 +95,28 @@ func slug(value string) string {
 	return strings.Trim(nonLabel.ReplaceAllString(strings.ToLower(value), "-"), "-")
 }
 
-func run(args []string) error {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	f := addServiceFlags(fs, false)
-	readyTimeout := fs.Duration("ready-timeout", 60*time.Second, "time allowed for the service to start listening")
-	urlEnv := fs.String("url-env", "", "also set this environment variable to the public URL")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	rest := fs.Args()
-	if len(rest) < 3 || rest[1] != "--" {
-		return errors.New("expected SERVICE -- COMMAND [ARGS...]")
-	}
+func runService(f serviceFlags, readyTimeout time.Duration, urlEnv, name string, args []string) error {
 	port, err := freePort()
 	if err != nil {
 		return err
 	}
-	registration, err := registrationFromFlags(f, rest[0], port)
+	registration, err := registrationFromFlags(f, name, port)
 	if err != nil {
 		return err
 	}
-	if *urlEnv != "" && !envNamePattern.MatchString(*urlEnv) {
+	if urlEnv != "" && !envNamePattern.MatchString(urlEnv) {
 		return errors.New("--url-env must be an environment variable name")
 	}
-	commandArgs := make([]string, len(rest[2:]))
-	for i, arg := range rest[2:] {
+	commandArgs := make([]string, len(args))
+	for i, arg := range args {
 		commandArgs[i] = strings.ReplaceAll(arg, "{port}", strconv.Itoa(port))
 	}
 	cmd := exec.Command(commandArgs[0], commandArgs[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	cmd.Env = append(os.Environ(), "PORT="+strconv.Itoa(port), "DEVPROXY_URL="+publicURL(registration))
-	if *urlEnv != "" {
-		cmd.Env = append(cmd.Env, *urlEnv+"="+publicURL(registration))
+	if urlEnv != "" {
+		cmd.Env = append(cmd.Env, urlEnv+"="+publicURL(registration))
 	}
 	terminal := foregroundChild(cmd)
 	defer terminal.restore()
@@ -215,7 +138,7 @@ func run(args []string) error {
 			return err
 		}
 	}
-	deadline := time.NewTimer(*readyTimeout)
+	deadline := time.NewTimer(readyTimeout)
 	defer deadline.Stop()
 	probe := time.NewTicker(200 * time.Millisecond)
 	defer probe.Stop()
@@ -466,16 +389,11 @@ func waitChild(cmd *exec.Cmd, done chan<- error, stopped chan<- struct{}) {
 	}
 }
 
-func register(args []string) error {
-	fs := flag.NewFlagSet("register", flag.ContinueOnError)
-	f := addServiceFlags(fs, true)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 1 || *f.port < 1 || *f.port > 65535 {
+func registerService(f serviceFlags, name string) error {
+	if *f.port < 1 || *f.port > 65535 {
 		return errors.New("expected --port PORT SERVICE")
 	}
-	registration, err := registrationFromFlags(f, fs.Arg(0), *f.port)
+	registration, err := registrationFromFlags(f, name, *f.port)
 	if err != nil {
 		return err
 	}
@@ -664,25 +582,12 @@ func requestContext(ctx context.Context, daemon, path string, input, output any)
 	return response.StatusCode, nil
 }
 
-func list(args []string) error {
-	return listTo(args, os.Stdout)
-}
-
-func listTo(args []string, out io.Writer) error {
-	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	daemon := fs.String("daemon", defaultDaemon, "devproxy daemon origin")
-	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 0 {
-		return errors.New("list does not accept positional arguments")
-	}
-	services, err := fetchServices(*daemon)
+func listServices(daemon string, asJSON bool, out io.Writer) error {
+	services, err := fetchServices(daemon)
 	if err != nil {
 		return err
 	}
-	if *asJSON {
+	if asJSON {
 		return json.NewEncoder(out).Encode(services)
 	}
 	for _, service := range services {
@@ -691,32 +596,17 @@ func listTo(args []string, out io.Writer) error {
 	return nil
 }
 
-func inspect(args []string) error {
-	return inspectTo(args, os.Stdout)
-}
-
-func inspectTo(args []string, out io.Writer) error {
-	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
-	daemon := fs.String("daemon", defaultDaemon, "devproxy daemon origin")
-	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
-	route := fs.String("route", "", "select a route when multiple services share a host")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 1 {
-		return errors.New("expected one registration ID, hostname, or service URL")
-	}
-	if *route != "" && !strings.HasPrefix(*route, "/") {
+func inspectService(daemon string, asJSON bool, route, query string, out io.Writer) error {
+	if route != "" && !strings.HasPrefix(route, "/") {
 		return errors.New("--route must begin with /")
 	}
-	services, err := fetchServices(*daemon)
+	services, err := fetchServices(daemon)
 	if err != nil {
 		return err
 	}
-	query := fs.Arg(0)
 	var matches []devproxy.Service
 	for _, service := range services {
-		if (service.ID == query || service.Host == query || service.URL == query) && (*route == "" || service.Route == *route) {
+		if (service.ID == query || service.Host == query || service.URL == query) && (route == "" || service.Route == route) {
 			matches = append(matches, service)
 		}
 	}
@@ -727,7 +617,7 @@ func inspectTo(args []string, out io.Writer) error {
 		return fmt.Errorf("%q matches %d registrations; pass --route or use a registration ID", query, len(matches))
 	}
 	service := matches[0]
-	if *asJSON {
+	if asJSON {
 		return json.NewEncoder(out).Encode(service)
 	}
 	fmt.Fprintf(out, "ID:       %s\nProject:  %s\nWorktree: %s\nService:  %s\nURL:      %s\nHost:     %s\nRoute:    %s\nPort:     %d\nExpires:  %s\n",
