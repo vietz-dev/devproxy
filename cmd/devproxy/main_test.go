@@ -1,20 +1,79 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/dreifach-ai/devproxy/internal/devproxy"
 )
+
+func TestMain(m *testing.M) {
+	if os.Getenv("DEVPROXY_SIGNAL_RELAY") == "1" {
+		signalRelay()
+		return
+	}
+	os.Exit(m.Run())
+}
+
+func TestSignalRelayReportsInterrupt(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	relay := exec.Command(os.Args[0])
+	relay.Env = append(os.Environ(), "DEVPROXY_SIGNAL_RELAY=1")
+	relay.ExtraFiles = []*os.File{writer}
+	relay.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := relay.Start(); err != nil {
+		_ = writer.Close()
+		t.Fatal(err)
+	}
+	_ = writer.Close()
+	defer func() {
+		_ = relay.Process.Kill()
+		_ = relay.Wait()
+	}()
+	bytes := make(chan byte, 2)
+	go func() {
+		var b [1]byte
+		for {
+			if _, err := reader.Read(b[:]); err != nil {
+				return
+			}
+			bytes <- b[0]
+		}
+	}()
+	for _, want := range []byte{'R', 'I'} {
+		if want == 'I' {
+			if err := relay.Process.Signal(os.Interrupt); err != nil {
+				t.Fatal(err)
+			}
+		}
+		select {
+		case got := <-bytes:
+			if got != want {
+				t.Fatalf("relay sent %q, want %q", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("relay did not send %q", want)
+		}
+	}
+}
 
 func TestHelperHTTPService(t *testing.T) {
 	if os.Getenv("DEVPROXY_HELPER") != "1" {
@@ -30,6 +89,175 @@ func TestHelperHTTPService(t *testing.T) {
 	time.Sleep(1200 * time.Millisecond)
 	_ = listener.Close()
 	os.Exit(0)
+}
+
+func TestHelperHoldPort(t *testing.T) {
+	if os.Getenv("DEVPROXY_HOLD_PORT") != "1" {
+		return
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("PORT"))
+	if err != nil {
+		os.Exit(2)
+	}
+	if err := os.WriteFile(os.Getenv("DEVPROXY_HOLD_INFO"), []byte(fmt.Sprintf("%d:%s", os.Getpid(), os.Getenv("PORT"))), 0600); err != nil {
+		os.Exit(3)
+	}
+	defer listener.Close()
+	for {
+		time.Sleep(time.Hour)
+	}
+}
+
+func TestHelperInteractiveService(t *testing.T) {
+	if os.Getenv("DEVPROXY_INTERACTIVE_CHILD") != "1" {
+		return
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:"+os.Getenv("PORT"))
+	if err != nil {
+		os.Exit(2)
+	}
+	defer listener.Close()
+	if os.Getenv("DEVPROXY_IGNORE_INT") == "1" {
+		signal.Ignore(os.Interrupt)
+	}
+	fmt.Println("INTERACTIVE_READY")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil || line != "ping\n" {
+		os.Exit(3)
+	}
+	fmt.Println("INTERACTIVE_INPUT_OK")
+}
+
+func TestRunPreservesInteractiveInput(t *testing.T) {
+	if os.Getenv("DEVPROXY_INTERACTIVE_TEST") != "1" {
+		t.Skip("run the compiled test binary with DEVPROXY_INTERACTIVE_TEST=1 in a terminal")
+	}
+	if group, ok := terminalForegroundGroup(os.Stdin.Fd()); !ok || (int(group) != syscall.Getpgrp() && os.Getenv("DEVPROXY_BACKGROUND_TEST") != "1") {
+		t.Skip("interactive test needs a foreground terminal")
+	}
+	t.Setenv("DEVPROXY_INTERACTIVE_CHILD", "1")
+	release := make(chan struct{})
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/register" {
+			if os.Getenv("DEVPROXY_STALL_REGISTER") == "1" {
+				select {
+				case <-r.Context().Done():
+				case <-release:
+				}
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer daemon.Close()
+	defer close(release)
+	if err := run([]string{"--project", "example", "--worktree", "test", "--daemon", daemon.URL,
+		"web", "--", os.Args[0], "-test.run=TestHelperInteractiveService"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunWithRedirectedStdin(t *testing.T) {
+	if os.Getenv("DEVPROXY_REDIRECTED_TEST") != "1" {
+		t.Skip("run the compiled test binary with redirected stdin in a terminal")
+	}
+	t.Setenv("DEVPROXY_HOLD_PORT", "1")
+	t.Setenv("DEVPROXY_HOLD_INFO", t.TempDir()+"/child-info")
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/register" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer daemon.Close()
+	if err := run([]string{"--project", "example", "--worktree", "redirected", "--daemon", daemon.URL,
+		"web", "--", os.Args[0], "-test.run=TestHelperHoldPort"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunStopsServerBehindShellWrapper(t *testing.T) {
+	info := t.TempDir() + "/child-info"
+	t.Setenv("DEVPROXY_HOLD_PORT", "1")
+	t.Setenv("DEVPROXY_HOLD_INFO", info)
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "registration rejected", http.StatusBadGateway)
+	}))
+	defer daemon.Close()
+	err := run([]string{"--project", "example", "--worktree", "test", "--daemon", daemon.URL,
+		"--ready-timeout", "3s", "web", "--", "sh", "-c", `"$1" -test.run=TestHelperHoldPort & wait`, "sh", os.Args[0]})
+	if err == nil {
+		t.Fatal("expected registration to fail")
+	}
+	data, err := os.ReadFile(info)
+	if err != nil {
+		t.Fatalf("server helper did not start: %v", err)
+	}
+	parts := strings.SplitN(string(data), ":", 2)
+	if len(parts) != 2 {
+		t.Fatalf("invalid helper info: %q", data)
+	}
+	pid, err := strconv.Atoi(parts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := "127.0.0.1:" + parts[1]
+	t.Cleanup(func() {
+		if conn, err := net.DialTimeout("tcp", address, 100*time.Millisecond); err == nil {
+			_ = conn.Close()
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		conn, err := net.DialTimeout("tcp", address, 100*time.Millisecond)
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("server behind shell wrapper still listens on %s after devproxy exits", address)
+}
+
+func TestKeepAliveHandlesSignalDuringStalledHeartbeat(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/heartbeat" {
+			close(started)
+			select {
+			case <-r.Context().Done():
+			case <-release:
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer daemon.Close()
+	defer close(release)
+	ticks := make(chan time.Time, 1)
+	signals := make(chan os.Signal, 1)
+	done := make(chan error, 1)
+	go func() {
+		done <- keepAliveWithTicks(daemon.URL, devproxy.Registration{ID: strings.Repeat("a", 32)}, nil, signals, nil, ticks)
+	}()
+	ticks <- time.Now()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("heartbeat never started")
+	}
+	signals <- syscall.SIGTERM
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("signal handling waited for a stalled heartbeat")
+	}
 }
 
 func TestRunRegistersAndUnregistersService(t *testing.T) {
