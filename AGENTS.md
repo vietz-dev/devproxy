@@ -15,6 +15,19 @@ devproxy daemon to mirror Kata.
    contract, `just build` to build the dashboard and binary, and `just test`
    to verify Go changes.
 
+## Code review
+
+Use roborev for substantive code changes. `mise.toml` declares the CLI; run
+`mise install` if it is unavailable. Git hooks are local: run `roborev doctor`
+in a new checkout, then `roborev init` if the post-commit hook is missing. The
+daemon and review history also live locally, outside Git.
+
+Review uncommitted changes with `roborev review --dirty --wait`, or review the
+current commit with `roborev review --wait` and read it with `roborev show HEAD`.
+Inspect findings, fix confirmed issues, and rerun review for changed code.
+`REVIEW.md` contains this project's standing review guidance. A committed
+version on the default branch is used for reviews across worktrees.
+
 ## Design rules
 
 - CLI commands own workflows. The browser reads the same daemon API and helps
