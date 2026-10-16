@@ -31,6 +31,30 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func executeCommand(args []string, out io.Writer) error {
+	root := newRootCommand()
+	root.SetArgs(args)
+	root.SetOut(out)
+	root.SetErr(io.Discard)
+	return root.Execute()
+}
+
+func run(args []string) error {
+	return executeCommand(append([]string{"run"}, args...), io.Discard)
+}
+
+func register(args []string) error {
+	return executeCommand(append([]string{"register"}, args...), io.Discard)
+}
+
+func listTo(args []string, out io.Writer) error {
+	return executeCommand(append([]string{"list"}, args...), out)
+}
+
+func inspectTo(args []string, out io.Writer) error {
+	return executeCommand(append([]string{"inspect"}, args...), out)
+}
+
 func TestSignalRelayReportsInterrupt(t *testing.T) {
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -298,7 +322,7 @@ func TestRunRegistersAndUnregistersService(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Setenv("DEVPROXY_HELPER", "1")
-	if err := run([]string{"--project", "example", "--worktree", "test", "--daemon", "http://" + listen, "web", "--", os.Args[0], "-test.run=TestHelperHTTPService"}); err != nil {
+	if err := run([]string{"web", "--project", "example", "--worktree", "test", "--daemon", "http://" + listen, "--", os.Args[0], "-test.run=TestHelperHTTPService"}); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -361,7 +385,7 @@ func TestListAndInspectOutput(t *testing.T) {
 		if target != services[1].ID {
 			args = append(args, "--route", "/api")
 		}
-		args = append(args, target)
+		args = append([]string{target}, args...)
 		if err := inspectTo(args, &out); err != nil {
 			t.Fatalf("inspect %s: %v", target, err)
 		}
@@ -385,6 +409,29 @@ func TestListAndInspectOutput(t *testing.T) {
 	}
 	if err := inspectTo([]string{"--daemon", daemon.URL, "missing.localhost"}, &out); err == nil || !strings.Contains(err.Error(), "no active registration") {
 		t.Fatalf("expected missing registration error, got %v", err)
+	}
+}
+
+func TestRegisterAcceptsFlagsAfterService(t *testing.T) {
+	port, err := freePort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = register([]string{"web", "--project", "example", "--worktree", "test", "--port", strconv.Itoa(port)})
+	if err == nil || !strings.Contains(err.Error(), "service is not listening") {
+		t.Fatalf("expected connection check after parsing flags, got %v", err)
+	}
+}
+
+func TestRunHelpWithoutCommand(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"-h"}} {
+		var out bytes.Buffer
+		if err := executeCommand(append([]string{"run"}, args...), &out); err != nil {
+			t.Fatalf("run %v: %v", args, err)
+		}
+		if !strings.Contains(out.String(), "Usage:\n  devproxy run") || !strings.Contains(out.String(), "--ready-timeout") {
+			t.Fatalf("run %v: incomplete help output: %q", args, out.String())
+		}
 	}
 }
 
