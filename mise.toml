@@ -1,0 +1,4 @@
+[tools]
+"github:kenn-io/kata" = "latest"
+"github:kenn-io/roborev" = "latest"
+just = "latest"

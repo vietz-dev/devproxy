@@ -47,6 +47,8 @@ func main() {
 		err = register(os.Args[2:])
 	case "list":
 		err = list(os.Args[2:])
+	case "inspect":
+		err = inspect(os.Args[2:])
 	case "help", "--help", "-h":
 		usage()
 		return
@@ -66,10 +68,11 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `Usage:
-  devproxy serve [--listen 127.0.0.1:7654] [--caddy-admin http://127.0.0.1:2019]
+  devproxy serve [--listen 127.0.0.1:7654] [--caddy-admin http://127.0.0.1:2019] [--docker-desktop]
   devproxy run --project PROJECT [--route /api] [--url-env APP_URL] SERVICE -- COMMAND [ARGS...]
   devproxy register --project PROJECT --port PORT [--route /api] SERVICE
-  devproxy list
+  devproxy list [--json]
+  devproxy inspect [--json] [--route /api] ID|HOST|URL
 
 Run and register derive the worktree name from the current git checkout.
 The run command sets PORT and replaces {port} in command arguments.`)
@@ -79,6 +82,7 @@ func serve(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	listen := fs.String("listen", "127.0.0.1:7654", "local control and dashboard address")
 	admin := fs.String("caddy-admin", "http://127.0.0.1:2019", "Caddy admin API origin")
+	dockerDesktop := fs.Bool("docker-desktop", false, "connect to Caddy in the Docker Desktop bridge setup")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -89,7 +93,11 @@ func serve(args []string) error {
 	if err != nil || host != "127.0.0.1" {
 		return errors.New("serve must listen on 127.0.0.1")
 	}
-	server, err := devproxy.NewServer(*admin, *listen, "127.0.0.1")
+	upstreamHost := "127.0.0.1"
+	if *dockerDesktop {
+		upstreamHost = "host.docker.internal"
+	}
+	server, err := devproxy.NewServer(*admin, *listen, upstreamHost)
 	if err != nil {
 		return err
 	}
@@ -657,29 +665,92 @@ func requestContext(ctx context.Context, daemon, path string, input, output any)
 }
 
 func list(args []string) error {
+	return listTo(args, os.Stdout)
+}
+
+func listTo(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	daemon := fs.String("daemon", defaultDaemon, "devproxy daemon origin")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
 		return errors.New("list does not accept positional arguments")
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	response, err := client.Get(strings.TrimRight(*daemon, "/") + "/v1/services")
+	services, err := fetchServices(*daemon)
 	if err != nil {
 		return err
 	}
+	if *asJSON {
+		return json.NewEncoder(out).Encode(services)
+	}
+	for _, service := range services {
+		fmt.Fprintf(out, "%-42s %-12s %-16s %s\n", service.URL, service.Route, service.Service, net.JoinHostPort("127.0.0.1", strconv.Itoa(service.Port)))
+	}
+	return nil
+}
+
+func inspect(args []string) error {
+	return inspectTo(args, os.Stdout)
+}
+
+func inspectTo(args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	daemon := fs.String("daemon", defaultDaemon, "devproxy daemon origin")
+	asJSON := fs.Bool("json", false, "emit machine-readable JSON")
+	route := fs.String("route", "", "select a route when multiple services share a host")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("expected one registration ID, hostname, or service URL")
+	}
+	if *route != "" && !strings.HasPrefix(*route, "/") {
+		return errors.New("--route must begin with /")
+	}
+	services, err := fetchServices(*daemon)
+	if err != nil {
+		return err
+	}
+	query := fs.Arg(0)
+	var matches []devproxy.Service
+	for _, service := range services {
+		if (service.ID == query || service.Host == query || service.URL == query) && (*route == "" || service.Route == *route) {
+			matches = append(matches, service)
+		}
+	}
+	if len(matches) == 0 {
+		return fmt.Errorf("no active registration matches %q", query)
+	}
+	if len(matches) > 1 {
+		return fmt.Errorf("%q matches %d registrations; pass --route or use a registration ID", query, len(matches))
+	}
+	service := matches[0]
+	if *asJSON {
+		return json.NewEncoder(out).Encode(service)
+	}
+	fmt.Fprintf(out, "ID:       %s\nProject:  %s\nWorktree: %s\nService:  %s\nURL:      %s\nHost:     %s\nRoute:    %s\nPort:     %d\nExpires:  %s\n",
+		service.ID, service.Project, service.Worktree, service.Service, service.URL, service.Host, service.Route, service.Port, service.ExpiresAt.Format(time.RFC3339))
+	return nil
+}
+
+func fetchServices(daemon string) ([]devproxy.Service, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Get(strings.TrimRight(daemon, "/") + "/v1/services")
+	if err != nil {
+		return nil, err
+	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("daemon returned HTTP %d", response.StatusCode)
+		return nil, fmt.Errorf("daemon returned HTTP %d", response.StatusCode)
 	}
 	var services []devproxy.Service
 	if err := json.NewDecoder(response.Body).Decode(&services); err != nil {
-		return err
+		return nil, err
 	}
-	for _, service := range services {
-		fmt.Printf("%-42s %-12s %-16s %s\n", service.URL, service.Route, service.Service, net.JoinHostPort("127.0.0.1", strconv.Itoa(service.Port)))
+	if services == nil {
+		services = []devproxy.Service{}
 	}
-	return nil
+	return services, nil
 }

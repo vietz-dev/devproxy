@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -317,5 +319,86 @@ func TestRunRegistersAndUnregistersService(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestListAndInspectOutput(t *testing.T) {
+	services := []devproxy.Service{
+		{Registration: devproxy.Registration{ID: strings.Repeat("a", 32), Project: "example", Worktree: "feature", Service: "web", Route: "/", Port: 3000}, Host: "example-feature.localhost", URL: "https://example-feature.localhost", ExpiresAt: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)},
+		{Registration: devproxy.Registration{ID: strings.Repeat("b", 32), Project: "example", Worktree: "feature", Service: "api", Route: "/api", Port: 3001}, Host: "example-feature.localhost", URL: "https://example-feature.localhost", ExpiresAt: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)},
+	}
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/services" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(services)
+	}))
+	defer daemon.Close()
+
+	var out bytes.Buffer
+	if err := listTo([]string{"--daemon", daemon.URL}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "https://example-feature.localhost") || !strings.Contains(out.String(), "127.0.0.1:3001") {
+		t.Fatalf("human list missing service details: %q", out.String())
+	}
+	out.Reset()
+	if err := listTo([]string{"--daemon", daemon.URL, "--json"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	var listed []devproxy.Service
+	if err := json.Unmarshal(out.Bytes(), &listed); err != nil {
+		t.Fatalf("list JSON: %v; output %q", err, out.String())
+	}
+	if len(listed) != 2 || listed[0].ID != services[0].ID || listed[1].Route != "/api" {
+		t.Fatalf("unexpected list JSON: %+v", listed)
+	}
+
+	for _, target := range []string{services[1].ID, services[1].Host, services[1].URL} {
+		out.Reset()
+		args := []string{"--daemon", daemon.URL, "--json"}
+		if target != services[1].ID {
+			args = append(args, "--route", "/api")
+		}
+		args = append(args, target)
+		if err := inspectTo(args, &out); err != nil {
+			t.Fatalf("inspect %s: %v", target, err)
+		}
+		var got devproxy.Service
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+			t.Fatalf("inspect JSON: %v", err)
+		}
+		if got.ID != services[1].ID || got.Port != 3001 {
+			t.Fatalf("inspect %s returned %+v", target, got)
+		}
+	}
+	out.Reset()
+	if err := inspectTo([]string{"--daemon", daemon.URL, services[0].ID}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Service:  web") || !strings.Contains(out.String(), "Expires:  2026-10-17T12:00:00Z") {
+		t.Fatalf("human inspect missing details: %q", out.String())
+	}
+	if err := inspectTo([]string{"--daemon", daemon.URL, services[0].Host}, &out); err == nil || !strings.Contains(err.Error(), "matches 2 registrations") {
+		t.Fatalf("expected ambiguous host error, got %v", err)
+	}
+	if err := inspectTo([]string{"--daemon", daemon.URL, "missing.localhost"}, &out); err == nil || !strings.Contains(err.Error(), "no active registration") {
+		t.Fatalf("expected missing registration error, got %v", err)
+	}
+}
+
+func TestListJSONEmptyArray(t *testing.T) {
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("null"))
+	}))
+	defer daemon.Close()
+	var out bytes.Buffer
+	if err := listTo([]string{"--daemon", daemon.URL, "--json"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "[]\n" {
+		t.Fatalf("empty list JSON = %q, want []", out.String())
 	}
 }
