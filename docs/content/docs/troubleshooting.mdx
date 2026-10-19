@@ -5,15 +5,15 @@ description: Diagnose daemon, Caddy, certificate, and service startup issues.
 
 ## `devproxy list` cannot reach the daemon
 
-Start the dedicated Caddy instance, then run `devproxy serve` in a terminal. The control API listens on `127.0.0.1:7654` by default. If you changed its address, pass the matching `--daemon` option to `run`, `register`, and `list`.
+Run `devproxy serve` in a terminal. It starts embedded Caddy by default. The control API listens on `127.0.0.1:7654`. If you changed its address, pass the matching `--daemon` option to `run`, `register`, and `list`.
 
-## `serve` cannot connect to Caddy
+## `serve` cannot start the proxy
 
-Make sure the dedicated Caddy instance is running and its admin API is reachable at `http://127.0.0.1:2019`. Check that another proxy is not using ports 443 or 2019. Start Caddy before `serve`. The daemon must own this Caddy instance's configuration.
+For embedded mode, check that another proxy is not using port 443. On Linux, follow the [port 443 setup](/docs/getting-started#start-the-proxy-and-daemon). For external mode, start dedicated Caddy first and ensure its local admin API is reachable at the URL passed to `--caddy-admin`.
 
 ## Browser reports an untrusted certificate
 
-Caddy uses its local certificate authority for `.localhost` HTTPS. Follow the [macOS trust steps](/docs/getting-started#trust-local-https), or trust that root certificate in your Linux system or browser. The authority is kept in the Compose volume, so restarting Caddy normally does not change it.
+Caddy uses its local certificate authority for `.localhost` HTTPS. Follow the [macOS trust steps](/docs/getting-started#trust-local-https), or trust that root certificate in your Linux system or browser. Embedded mode keeps the authority in the user config directory under `devproxy/caddy`; external Docker mode keeps it in a Compose volume.
 
 ## `run` says the service did not start listening
 

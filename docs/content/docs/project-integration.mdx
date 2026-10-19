@@ -13,7 +13,7 @@ devproxy run --project kasta --url-env NEXT_PUBLIC_APP_URL web -- next dev -p '{
 
 The command starts Next.js on the chosen port and gives it `PORT`, `DEVPROXY_URL`, and `NEXT_PUBLIC_APP_URL`. The worktree's URL is `https://kasta-<worktree-folder>.localhost`. Keep the wrapper running while using the app.
 
-If a project's `dev` script already wraps devproxy, run that script directly. The Kasta root uses `pnpm dev` after Caddy and `devproxy serve` are running; its web script registers the worktree and sets `NEXT_PUBLIC_APP_URL` automatically.
+If a project's `dev` script already wraps devproxy, run that script directly. The Kasta root uses `pnpm dev` after `devproxy serve` is running; its web script registers the worktree and sets `NEXT_PUBLIC_APP_URL` automatically.
 
 See [Routes and URLs](/docs/routing) when an API and frontend should share an origin. For an existing service that controls its own port, use [`devproxy register`](/docs/cli#register).
 

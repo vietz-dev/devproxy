@@ -48,11 +48,19 @@ func serve(listen, admin string, dockerDesktop bool) error {
 	if err != nil || host != "127.0.0.1" {
 		return errors.New("serve must listen on 127.0.0.1")
 	}
-	upstreamHost := "127.0.0.1"
-	if dockerDesktop {
-		upstreamHost = "host.docker.internal"
+	if dockerDesktop && admin == "" {
+		return errors.New("--docker-desktop requires --caddy-admin")
 	}
-	server, err := devproxy.NewServer(admin, listen, upstreamHost)
+	var server *devproxy.Server
+	if admin == "" {
+		server, err = devproxy.NewEmbeddedServer(listen)
+	} else {
+		upstreamHost := "127.0.0.1"
+		if dockerDesktop {
+			upstreamHost = "host.docker.internal"
+		}
+		server, err = devproxy.NewServer(admin, listen, upstreamHost)
+	}
 	if err != nil {
 		return err
 	}
