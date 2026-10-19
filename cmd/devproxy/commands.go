@@ -24,7 +24,7 @@ func newServeCommand() *cobra.Command {
 	var dockerDesktop bool
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Serve the local dashboard and control API",
+		Short: "Serve the local proxy, dashboard, and control API",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 0 {
 				return errors.New("serve does not accept positional arguments")
@@ -34,8 +34,8 @@ func newServeCommand() *cobra.Command {
 		RunE: func(_ *cobra.Command, _ []string) error { return serve(listen, admin, dockerDesktop) },
 	}
 	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:7654", "local control and dashboard address")
-	cmd.Flags().StringVar(&admin, "caddy-admin", "http://127.0.0.1:2019", "Caddy admin API origin")
-	cmd.Flags().BoolVar(&dockerDesktop, "docker-desktop", false, "connect to Caddy in the Docker Desktop bridge setup")
+	cmd.Flags().StringVar(&admin, "caddy-admin", "", "use an external Caddy admin API instead of embedded Caddy")
+	cmd.Flags().BoolVar(&dockerDesktop, "docker-desktop", false, "connect to external Caddy in the Docker Desktop bridge setup")
 	return cmd
 }
 

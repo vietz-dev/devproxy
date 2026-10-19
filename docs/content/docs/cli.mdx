@@ -6,10 +6,10 @@ description: devproxy commands, options, and child process environment.
 ## `serve`
 
 ```sh
-devproxy serve [--listen 127.0.0.1:7654] [--caddy-admin http://127.0.0.1:2019] [--docker-desktop]
+devproxy serve [--listen 127.0.0.1:7654] [--caddy-admin URL] [--docker-desktop]
 ```
 
-Runs the local dashboard and control API. Start the dedicated Caddy instance first. The control listener must use `127.0.0.1`; its default port is `7654`. `--caddy-admin` points to Caddy's local HTTP admin origin. Use `--docker-desktop` with `caddy/compose.desktop.yml` on Docker Desktop for macOS; it makes Caddy reach host services through `host.docker.internal`.
+Runs embedded Caddy, the local dashboard, and the control API by default. The control listener must use `127.0.0.1`; its default port is `7654`. Pass `--caddy-admin http://127.0.0.1:2019` to use a dedicated external Caddy instance instead. `--docker-desktop` requires `--caddy-admin` and makes external Caddy reach host services through `host.docker.internal`.
 
 ## `run`
 

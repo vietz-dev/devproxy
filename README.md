@@ -1,9 +1,10 @@
 # devproxy
 
-Local HTTPS names for services running in multiple Git worktrees. One Caddy
-instance handles TLS and reverse proxying. `devproxy` runs a small dashboard,
-registers routes with Caddy, and wraps development commands with an available
-port. It does not proxy application traffic itself.
+Local HTTPS names for services running in multiple Git worktrees. Caddy runs
+inside `devproxy serve` by default and handles TLS and reverse proxying.
+`devproxy` runs a small dashboard, registers routes with Caddy, and wraps
+development commands with an available port. It does not proxy application
+traffic itself.
 
 This is an early local development tool. It currently targets macOS and Linux
 with services running on the host. A service inside Docker can also be
@@ -18,7 +19,7 @@ the planned CLI-first, agent-friendly control model and React operator UI.
 
 ## Build
 
-Go 1.24 or newer, Node.js 22 or newer, npm, and Just are required to rebuild
+Go 1.26 or newer, Node.js 22 or newer, npm, and Just are required to rebuild
 the dashboard and binary together:
 
 ```sh
@@ -31,6 +32,20 @@ dashboard assets, run `just go`. Run `just test` for the Go test suite.
 
 `bin/devproxy` is the only program a project needs for registration. It has no
 Node.js or npm runtime dependency.
+
+## Install or update from source
+
+From this checkout, run:
+
+```sh
+just install
+```
+
+This rebuilds the dashboard and Go binary, then installs `devproxy` to
+`~/.local/bin/devproxy`. Running it again updates that installation. Make sure
+`~/.local/bin` is on your `PATH`. To choose another writable directory, run
+`DEVPROXY_INSTALL_DIR="$HOME/bin" just install`. A running `devproxy serve`
+process keeps using its old executable until you restart it.
 
 ## Install the agent skill in a project
 
@@ -48,17 +63,51 @@ project, so new agent sessions can use it. Once this repository is published
 at `github.com/dreifach-ai/devproxy`, use
 `npx skills add dreifach-ai/devproxy --skill devproxy` instead.
 
-## Start Caddy once
+## Start the proxy
 
-`devproxy serve` requires a **dedicated Caddy instance** whose admin endpoint
-is available at `http://127.0.0.1:2019`. It owns that instance's configuration;
-do not point it at a Caddy instance serving unrelated sites. Caddy also needs
-access to ports 443 and 2019. Stop any per-project Caddy or Portless service
-using 443 first.
+After installing, run the single binary:
 
-On Docker Desktop for macOS, use the bridge Compose setup. It publishes ports
-443 and 2019 only on the host loopback address. Caddy reaches host services
-through `host.docker.internal`:
+```sh
+devproxy serve
+```
+
+On Linux systems that restrict ports below 1024, grant the built binary
+permission to bind port 443 before running it:
+
+```sh
+sudo setcap cap_net_bind_service=+ep "$(command -v devproxy)"
+```
+
+Reapply this after updating the installed binary. A future service installer should
+manage this privilege without changing the binary. On macOS, follow the OS
+prompt if permission is needed.
+
+This starts Caddy in the same process, with its admin API disabled. It listens
+for HTTPS on host loopback port 443 and for local control on 127.0.0.1:7654.
+Open <https://devproxy.localhost> for the dashboard. Caddy keeps its local CA
+in the user config directory under `devproxy/caddy`; it may need permission to
+add that CA to the system trust store. If port 443 is already in use, stop the
+other proxy first. The first certificate may take a moment to become ready.
+
+If macOS still reports an untrusted certificate after the first request, trust
+the generated root certificate:
+
+```sh
+security add-trusted-cert -d -r trustRoot -k "$HOME/Library/Keychains/login.keychain-db" "$HOME/Library/Application Support/devproxy/caddy/pki/authorities/local/root.crt"
+```
+
+This embedded mode is an evolutionary prototype. It has no automatic daemon
+startup, trust-repair command, or migration of the old Docker volume yet.
+Existing Docker users should stop their Caddy container before trying it;
+the embedded CA is new and may need to be trusted separately.
+
+### Use an external Caddy instead
+
+The previous dedicated-Caddy setup remains available with `--caddy-admin`.
+Do not point devproxy at a Caddy instance serving unrelated sites because
+devproxy replaces its configuration. On Docker Desktop for macOS, the bridge
+Compose setup publishes ports 443 and 2019 on host loopback. Caddy reaches
+host services through `host.docker.internal`:
 
 ```sh
 just serve-desktop
@@ -72,7 +121,7 @@ On Linux Docker Engine or macOS OrbStack, use the host-network Compose setup:
 
 ```sh
 docker compose -f caddy/compose.yml up -d
-bin/devproxy serve
+bin/devproxy serve --caddy-admin http://127.0.0.1:2019
 ```
 
 Keep `devproxy serve` running in a terminal. Open
@@ -88,9 +137,9 @@ security add-trusted-cert -d -r trustRoot -k "$HOME/Library/Keychains/login.keyc
 The trust command may prompt for your macOS password. Other operating systems
 need their own trust-store step. The copied certificate is ignored by Git.
 
-You can also run Caddy natively with the included `caddy/Caddyfile`; the
-daemon still connects to its local admin endpoint. Caddy supports reloading a
-Caddyfile through `POST /load`, which is how registrations are applied.
+You can also run Caddy natively with the included `caddy/Caddyfile` and use
+`--caddy-admin http://127.0.0.1:2019`. External registrations are applied via
+the Caddy admin API.
 
 ## Register a service
 
@@ -133,21 +182,21 @@ restarts, running clients register again on their next heartbeat.
 
 ## Kasta example
 
-Install the binary on your `PATH`. After starting Caddy and `devproxy serve`,
+Install the binary on your `PATH`. After starting `devproxy serve`,
 run `pnpm dev` from the Kasta root. Its web script registers the worktree and
 sets `NEXT_PUBLIC_APP_URL` automatically. Open
 `https://kasta-<worktree-folder>.localhost`.
 
 ## Current limits
 
-- Caddy must be running before `devproxy serve` starts. The daemon retries
-  Caddy updates after a later Caddy restart.
+- External Caddy must be running before `devproxy serve --caddy-admin` starts.
+  The daemon retries updates after a later Caddy restart.
 - `run` expects the service to accept an allocated port through `PORT` or a
   `{port}` argument. It does not rewrite a service's own configuration.
 - Names are single DNS labels. Two checkouts with the same project and folder
   name cannot register the same route simultaneously.
 - The daemon's control endpoint listens only on `127.0.0.1:7654`. Treat this
-  as a local developer tool; the Caddy admin endpoint should also stay local.
+  as a local developer tool; an external Caddy admin endpoint must stay local.
 
 ## Verify changes
 
