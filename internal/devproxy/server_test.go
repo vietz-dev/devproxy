@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -154,6 +155,68 @@ func TestGeneratedCaddyfileAdapts(t *testing.T) {
 				t.Fatalf("generated Caddyfile is not formatted:\n%s", config)
 			}
 		})
+	}
+}
+
+func TestEmbeddedCaddyRoutesTraffic(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(r.URL.Path))
+	}))
+	defer upstream.Close()
+	port := upstream.Listener.Addr().(*net.TCPAddr).Port
+	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyPort := proxyListener.Addr().(*net.TCPAddr).Port
+	_ = proxyListener.Close()
+	services := []Service{{Registration: Registration{Route: "/api", Port: port}, Host: "example-worktree.localhost"}}
+	configFor := func(routes []Service) string {
+		config := renderCaddyfile(routes, upstream.Listener.Addr().String(), "127.0.0.1", "off")
+		return strings.Replace(config, "\tadmin off", "\tadmin off\n\tskip_install_trust\n\thttps_port "+itoa(proxyPort), 1)
+	}
+	storageDir := filepath.Join(t.TempDir(), "devproxy data")
+	if err := loadEmbeddedCaddy(configFor(nil), storageDir); err != nil {
+		t.Fatal(err)
+	}
+	defer stopEmbeddedCaddy()
+	if err := loadEmbeddedCaddy(configFor(services), storageDir); err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: "example-worktree.localhost"}}} // isolated test CA
+	var response *http.Response
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		request, requestErr := http.NewRequest(http.MethodGet, "https://127.0.0.1:"+itoa(proxyPort)+"/api/ping", nil)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		request.Host = "example-worktree.localhost"
+		response, err = client.Do(request)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("embedded Caddy did not serve TLS: %v", err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	if response.StatusCode != http.StatusOK || string(body) != "/api/ping" {
+		t.Fatalf("embedded proxy returned %d %q", response.StatusCode, body)
+	}
+	blocked, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:"+itoa(proxyPort)+"/v1/register", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked.Host = "devproxy.localhost"
+	blockedResponse, err := client.Do(blocked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = blockedResponse.Body.Close()
+	if blockedResponse.StatusCode != http.StatusNotFound {
+		t.Fatalf("public registration returned %d, want 404", blockedResponse.StatusCode)
 	}
 }
 

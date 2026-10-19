@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -59,6 +61,25 @@ type Server struct {
 	listen       string
 	upstreamHost string
 	client       *http.Client
+	loadCaddy    func(string) error
+	stopCaddy    func() error
+}
+
+// NewEmbeddedServer runs Caddy in this process and keeps its admin API disabled.
+func NewEmbeddedServer(listen string) (*Server, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("find devproxy data directory: %w", err)
+	}
+	s, err := NewServer("http://127.0.0.1:2019", listen, "127.0.0.1")
+	if err != nil {
+		return nil, err
+	}
+	s.adminListen = "off"
+	storageDir := filepath.Join(configDir, "devproxy", "caddy")
+	s.loadCaddy = func(config string) error { return loadEmbeddedCaddy(config, storageDir) }
+	s.stopCaddy = stopEmbeddedCaddy
+	return s, nil
 }
 
 func NewServer(adminURL, listen, upstreamHost string) (*Server, error) {
@@ -92,6 +113,9 @@ func (s *Server) Serve(ctx context.Context) error {
 		return err
 	}
 	defer listener.Close()
+	if s.stopCaddy != nil {
+		defer s.stopCaddy()
+	}
 	// A restarted daemon must first remove registrations left in Caddy by the
 	// previous process. Clients will register themselves again on heartbeat.
 	s.mu.Lock()
@@ -256,6 +280,9 @@ func (s *Server) sortedServices() []Service {
 
 func (s *Server) syncCaddy(ctx context.Context) error {
 	config := renderCaddyfile(s.sortedServices(), s.listen, s.upstreamHost, s.adminListen)
+	if s.loadCaddy != nil {
+		return s.loadCaddy(config)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.adminURL+"/load", strings.NewReader(config))
 	if err != nil {
 		return err

@@ -3,12 +3,12 @@ title: devproxy
 description: Local HTTPS names for services running in Git worktrees.
 ---
 
-devproxy gives each Git worktree a predictable local HTTPS URL, such as `https://kasta-feature-login.localhost`. One dedicated Caddy instance handles TLS and forwards requests. The `devproxy` daemon manages routes, while the CLI starts or registers development services. Application traffic goes through Caddy, not the daemon.
+devproxy gives each Git worktree a predictable local HTTPS URL, such as `https://kasta-feature-login.localhost`. Caddy handles TLS and forwards requests inside the `devproxy serve` process by default. The daemon manages routes, while the CLI starts or registers development services. Application traffic goes through Caddy.
 
 This is an early local development tool for macOS and Linux. Services run on the host, or in a container with their HTTP port published to the host.
 
 <Cards>
-  <Card title="Get started" href="/docs/getting-started" description="Build the CLI, start Caddy, and open your first service." />
+  <Card title="Get started" href="/docs/getting-started" description="Build the CLI, start the proxy, and open your first service." />
   <Card title="Use it in a project" href="/docs/project-integration" description="Wrap project scripts and install the agent skill." />
   <Card title="CLI reference" href="/docs/cli" description="Commands, flags, and environment variables." />
   <Card title="Routes and URLs" href="/docs/routing" description="Worktree names and shared origins." />
@@ -31,7 +31,7 @@ Dashed arrows show startup and route control. The browser's application requests
 ## How it works
 
 1. Caddy owns local HTTPS and proxies requests to services on `127.0.0.1`.
-2. `devproxy serve` runs the dashboard and control API on `127.0.0.1:7654`. It loads active routes into Caddy through Caddy's local admin API.
+2. `devproxy serve` runs Caddy, the dashboard, and the control API on `127.0.0.1:7654`. It loads active routes through Caddy's Go API. External Caddy remains available through its local admin API.
 3. `devproxy run` starts a development command on a free port, or `devproxy register` attaches an existing service. Both keep their registrations alive while they run.
 
 Open `https://devproxy.localhost` to see active services, or run `devproxy list`.
