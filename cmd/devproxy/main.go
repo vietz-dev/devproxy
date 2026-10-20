@@ -23,6 +23,7 @@ import (
 	"unsafe"
 
 	"github.com/dreifach-ai/devproxy/internal/devproxy"
+	"github.com/spf13/afero"
 )
 
 const defaultDaemon = "http://127.0.0.1:7654"
@@ -32,12 +33,16 @@ func main() {
 		signalRelay()
 		return
 	}
-	err := newRootCommand().Execute()
+	root, config := newRootCommandWithConfig(afero.NewOsFs())
+	err := root.Execute()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "devproxy:", err)
+		renderCLIError(os.Stderr, err, errorAsJSONAfterExecution(root, config, os.Args[1:]))
 		var exit interface{ ExitCode() int }
 		if errors.As(err, &exit) {
 			os.Exit(exit.ExitCode())
+		}
+		if strings.HasPrefix(err.Error(), "unknown command ") {
+			os.Exit(2)
 		}
 		os.Exit(1)
 	}
@@ -46,10 +51,10 @@ func main() {
 func serve(listen, admin string, dockerDesktop bool) error {
 	host, _, err := net.SplitHostPort(listen)
 	if err != nil || host != "127.0.0.1" {
-		return errors.New("serve must listen on 127.0.0.1")
+		return usage("serve must listen on 127.0.0.1", "devproxy serve --listen 127.0.0.1:7654")
 	}
 	if dockerDesktop && admin == "" {
-		return errors.New("--docker-desktop requires --caddy-admin")
+		return usage("--docker-desktop requires --caddy-admin", "devproxy serve --docker-desktop --caddy-admin http://127.0.0.1:2019")
 	}
 	var server *devproxy.Server
 	if admin == "" {
@@ -71,20 +76,20 @@ func serve(listen, admin string, dockerDesktop bool) error {
 
 func registrationFromFlags(f serviceFlags, name string, port int) (devproxy.Registration, error) {
 	if *f.project == "" {
-		return devproxy.Registration{}, errors.New("--project is required")
+		return devproxy.Registration{}, usage("--project is required", "devproxy run --project PROJECT SERVICE -- COMMAND")
 	}
 	worktree := *f.worktree
 	if worktree == "" {
 		cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 		output, err := cmd.Output()
 		if err != nil {
-			return devproxy.Registration{}, errors.New("run inside a git worktree or pass --worktree")
+			return devproxy.Registration{}, usage("run inside a git worktree or pass --worktree", "devproxy run --worktree NAME --project PROJECT SERVICE -- COMMAND")
 		}
 		worktree = filepath.Base(strings.TrimSpace(string(output)))
 	}
 	worktree = slug(worktree)
 	if worktree == "" {
-		return devproxy.Registration{}, errors.New("worktree name has no usable letters or digits")
+		return devproxy.Registration{}, usage("worktree name has no usable letters or digits", "devproxy run --worktree NAME --project PROJECT SERVICE -- COMMAND")
 	}
 	idBytes := make([]byte, 16)
 	if _, err := rand.Read(idBytes); err != nil {
@@ -113,7 +118,7 @@ func runService(f serviceFlags, readyTimeout time.Duration, urlEnv, name string,
 		return err
 	}
 	if urlEnv != "" && !envNamePattern.MatchString(urlEnv) {
-		return errors.New("--url-env must be an environment variable name")
+		return usage("--url-env must be an environment variable name", "devproxy run --url-env PUBLIC_URL --project PROJECT SERVICE -- COMMAND")
 	}
 	commandArgs := make([]string, len(args))
 	for i, arg := range args {
@@ -218,7 +223,9 @@ registrationLoop:
 	}
 	cancelAnnounce()
 	defer revoke(*f.daemon, registration.ID)
-	fmt.Printf("devproxy: %s → %s on port %d\n", registration.Service, publicURL(registration), port)
+	if !f.quiet {
+		fmt.Fprintf(os.Stderr, "devproxy: %s → %s on port %d\n", registration.Service, publicURL(registration), port)
+	}
 	return keepAliveWithStops(*f.daemon, registration, done, signals, cmd, stopped, interrupts, terminal)
 }
 
@@ -399,7 +406,7 @@ func waitChild(cmd *exec.Cmd, done chan<- error, stopped chan<- struct{}) {
 
 func registerService(f serviceFlags, name string) error {
 	if *f.port < 1 || *f.port > 65535 {
-		return errors.New("expected --port PORT SERVICE")
+		return usage("expected --port PORT SERVICE", "devproxy register --port PORT --project PROJECT SERVICE")
 	}
 	registration, err := registrationFromFlags(f, name, *f.port)
 	if err != nil {
@@ -414,7 +421,9 @@ func registerService(f serviceFlags, name string) error {
 		return err
 	}
 	defer revoke(*f.daemon, registration.ID)
-	fmt.Printf("devproxy: %s → %s on port %d\n", registration.Service, publicURL(registration), registration.Port)
+	if !f.quiet {
+		fmt.Fprintf(os.Stderr, "devproxy: %s → %s on port %d\n", registration.Service, publicURL(registration), registration.Port)
+	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signals)
@@ -591,6 +600,10 @@ func requestContext(ctx context.Context, daemon, path string, input, output any)
 }
 
 func listServices(daemon string, asJSON bool, out io.Writer) error {
+	return listServicesFormatted(daemon, asJSON, false, out)
+}
+
+func listServicesFormatted(daemon string, asJSON, plain bool, out io.Writer) error {
 	services, err := fetchServices(daemon)
 	if err != nil {
 		return err
@@ -599,14 +612,23 @@ func listServices(daemon string, asJSON bool, out io.Writer) error {
 		return json.NewEncoder(out).Encode(services)
 	}
 	for _, service := range services {
-		fmt.Fprintf(out, "%-42s %-12s %-16s %s\n", service.URL, service.Route, service.Service, net.JoinHostPort("127.0.0.1", strconv.Itoa(service.Port)))
+		address := net.JoinHostPort("127.0.0.1", strconv.Itoa(service.Port))
+		if plain {
+			fmt.Fprintf(out, "%s\t%s\t%s\t%s\n", plainField(service.URL), plainField(service.Route), plainField(service.Service), address)
+		} else {
+			fmt.Fprintf(out, "%-42s %-12s %-16s %s\n", service.URL, service.Route, service.Service, address)
+		}
 	}
 	return nil
 }
 
+var plainEscaper = strings.NewReplacer("\\", "\\\\", "\t", "\\t", "\r", "\\r", "\n", "\\n")
+
+func plainField(value string) string { return plainEscaper.Replace(value) }
+
 func inspectService(daemon string, asJSON bool, route, query string, out io.Writer) error {
 	if route != "" && !strings.HasPrefix(route, "/") {
-		return errors.New("--route must begin with /")
+		return usage("--route must begin with /", "devproxy inspect --route /api HOST")
 	}
 	services, err := fetchServices(daemon)
 	if err != nil {
@@ -619,10 +641,10 @@ func inspectService(daemon string, asJSON bool, route, query string, out io.Writ
 		}
 	}
 	if len(matches) == 0 {
-		return fmt.Errorf("no active registration matches %q", query)
+		return notFound(fmt.Sprintf("no active registration matches %q", query), "devproxy list")
 	}
 	if len(matches) > 1 {
-		return fmt.Errorf("%q matches %d registrations; pass --route or use a registration ID", query, len(matches))
+		return conflict(fmt.Sprintf("%q matches %d registrations; pass --route or use a registration ID", query, len(matches)), "devproxy inspect --route /api "+query)
 	}
 	service := matches[0]
 	if asJSON {
