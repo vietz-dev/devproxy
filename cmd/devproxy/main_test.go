@@ -520,6 +520,14 @@ func TestUsageAndLookupErrorsHaveSemanticExitCodes(t *testing.T) {
 	}
 }
 
+func TestInvalidCaddyAdminURLIsUsageError(t *testing.T) {
+	err := serve("127.0.0.1:7654", "https://127.0.0.1:2019", false)
+	var exit interface{ ExitCode() int }
+	if !errors.As(err, &exit) || exit.ExitCode() != 2 {
+		t.Fatalf("invalid Caddy admin URL: expected exit 2, got %v", err)
+	}
+}
+
 func TestQuietServiceFlagsAndConfiguredJSONErrors(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	if err := afero.WriteFile(fs, ".devproxy.yaml", []byte("json: true\n"), 0600); err != nil {
