@@ -3,13 +3,23 @@ title: CLI reference
 description: devproxy commands, options, and child process environment.
 ---
 
+## `start`, `status`, and `stop`
+
+```sh
+devproxy start [--listen 127.0.0.1:7654] [--caddy-admin URL] [--docker-desktop]
+devproxy status [--json] [--daemon http://127.0.0.1:7654]
+devproxy stop [--daemon http://127.0.0.1:7654]
+```
+
+`start` launches the shared daemon in the background and waits until embedded Caddy and the control API are ready. Running it again reports the existing daemon. It stays active when the shell closes. Logs go to `devproxy/daemon.log` under the user cache directory. `status` reports its process ID; `stop` shuts down the daemon and its embedded Caddy. For a custom `--listen` address, pass its corresponding `--daemon` origin to `status`, `stop`, and service commands. Startup at login is not automatic.
+
 ## `serve`
 
 ```sh
 devproxy serve [--listen 127.0.0.1:7654] [--caddy-admin URL] [--docker-desktop]
 ```
 
-Runs embedded Caddy, the local dashboard, and the control API by default. The control listener must use `127.0.0.1`; its default port is `7654`. Pass `--caddy-admin http://127.0.0.1:2019` to use a dedicated external Caddy instance instead. `--docker-desktop` requires `--caddy-admin` and makes external Caddy reach host services through `host.docker.internal`.
+Runs embedded Caddy, the local dashboard, and the control API in the foreground. The control listener must use `127.0.0.1`; its default port is `7654`. Pass `--caddy-admin http://127.0.0.1:2019` to use a dedicated external Caddy instance instead. `--docker-desktop` requires `--caddy-admin` and makes external Caddy reach host services through `host.docker.internal`.
 
 ## `run`
 

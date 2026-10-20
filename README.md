@@ -1,7 +1,7 @@
 # devproxy
 
 Local HTTPS names for services running in multiple Git worktrees. Caddy runs
-inside `devproxy serve` by default and handles TLS and reverse proxying.
+inside the devproxy daemon by default and handles TLS and reverse proxying.
 `devproxy` runs a small dashboard, registers routes with Caddy, and wraps
 development commands with an available port. It does not proxy application
 traffic itself.
@@ -44,8 +44,8 @@ just install
 This rebuilds the dashboard and Go binary, then installs `devproxy` to
 `~/.local/bin/devproxy`. Running it again updates that installation. Make sure
 `~/.local/bin` is on your `PATH`. To choose another writable directory, run
-`DEVPROXY_INSTALL_DIR="$HOME/bin" just install`. A running `devproxy serve`
-process keeps using its old executable until you restart it.
+`DEVPROXY_INSTALL_DIR="$HOME/bin" just install`. A running daemon keeps using
+its old executable until you restart it with `devproxy stop` and `devproxy start`.
 
 ## Install the agent skill in a project
 
@@ -65,11 +65,19 @@ at `github.com/dreifach-ai/devproxy`, use
 
 ## Start the proxy
 
-After installing, run the single binary:
+After installing, start the shared background daemon once:
 
 ```sh
-devproxy serve
+devproxy start
+devproxy status
 ```
+
+`start` waits for Caddy and the control API to become ready, then returns to
+your shell. It is safe to run again from another project; an existing daemon
+is reported without starting a second one. The daemon remains active after
+the terminal closes. Use `devproxy stop` to shut it down. Logs are written to
+the user cache directory at `devproxy/daemon.log`. To keep it in the foreground
+for development, use `devproxy serve`.
 
 On Linux systems that restrict ports below 1024, grant the built binary
 permission to bind port 443 before running it:
@@ -96,8 +104,8 @@ the generated root certificate:
 security add-trusted-cert -d -r trustRoot -k "$HOME/Library/Keychains/login.keychain-db" "$HOME/Library/Application Support/devproxy/caddy/pki/authorities/local/root.crt"
 ```
 
-This embedded mode is an evolutionary prototype. It has no automatic daemon
-startup, trust-repair command, or migration of the old Docker volume yet.
+This embedded mode is an evolutionary prototype. It has no automatic startup
+at login, trust-repair command, or migration of the old Docker volume yet.
 Existing Docker users should stop their Caddy container before trying it;
 the embedded CA is new and may need to be trusted separately.
 
@@ -114,7 +122,9 @@ just serve-desktop
 ```
 
 This recipe builds the Go binary, starts Caddy, and keeps `devproxy serve`
-running in the terminal. If an older host-network Caddy container is already
+running in the terminal. For a detached devproxy with external Caddy, run
+`devproxy start --caddy-admin http://127.0.0.1:2019 --docker-desktop` after
+starting the container. If an older host-network Caddy container is already
 running, Compose replaces it while preserving its certificate volume.
 
 On Linux Docker Engine or macOS OrbStack, use the host-network Compose setup:
@@ -124,7 +134,8 @@ docker compose -f caddy/compose.yml up -d
 bin/devproxy serve --caddy-admin http://127.0.0.1:2019
 ```
 
-Keep `devproxy serve` running in a terminal. Open
+Use `devproxy start --caddy-admin http://127.0.0.1:2019` to run devproxy in the
+background with this Caddy setup. Open
 <https://devproxy.localhost> for the dashboard. The Compose volume preserves
 Caddy's local certificate authority across restarts. To trust its root on
 macOS with Docker Desktop, after Caddy has served the first HTTPS request:
@@ -211,7 +222,7 @@ its upstream service.
 
 ## Kasta example
 
-Install the binary on your `PATH`. After starting `devproxy serve`,
+Install the binary on your `PATH`. After running `devproxy start` once,
 run `pnpm dev` from the Kasta root. Its web script registers the worktree and
 sets `NEXT_PUBLIC_APP_URL` automatically. Open
 `https://kasta-<worktree-folder>.localhost`.

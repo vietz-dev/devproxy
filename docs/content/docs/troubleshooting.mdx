@@ -5,11 +5,11 @@ description: Diagnose daemon, Caddy, certificate, and service startup issues.
 
 ## `devproxy list` cannot reach the daemon
 
-Run `devproxy serve` in a terminal. It starts embedded Caddy by default. The control API listens on `127.0.0.1:7654`. If you changed its address, pass the matching `--daemon` option to `run`, `register`, and `list`.
+Run `devproxy start` to launch embedded Caddy in the background, then check `devproxy status`. The control API listens on `127.0.0.1:7654`. If you changed its address, pass the matching `--daemon` option to `run`, `register`, `list`, `status`, and `stop`.
 
-## `serve` cannot start the proxy
+## `start` cannot start the proxy
 
-For embedded mode, check that another proxy is not using port 443. On Linux, follow the [port 443 setup](/docs/getting-started#start-the-proxy-and-daemon). For external mode, start dedicated Caddy first and ensure its local admin API is reachable at the URL passed to `--caddy-admin`.
+Check the log at `devproxy/daemon.log` under the user cache directory. For embedded mode, check that another proxy is not using port 443. On Linux, follow the [port 443 setup](/docs/getting-started#start-the-proxy-and-daemon). For external mode, start dedicated Caddy first and ensure its local admin API is reachable at the URL passed to `--caddy-admin`.
 
 ## Browser reports an untrusted certificate
 

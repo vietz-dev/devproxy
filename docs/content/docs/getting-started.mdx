@@ -21,23 +21,23 @@ just build
 Use `just go` to build from the checked-in dashboard assets without Node.js.
 Use `bin/devproxy` in the commands below, or put the binary on your `PATH` and use `devproxy`.
 
-To install or update from this checkout, run `just install`. It rebuilds the dashboard and binary, then installs `devproxy` to `~/.local/bin`. Make sure that directory is on your `PATH`. Set `DEVPROXY_INSTALL_DIR` to use another writable directory. Restart a running `devproxy serve` process after updating.
+To install or update from this checkout, run `just install`. It rebuilds the dashboard and binary, then installs `devproxy` to `~/.local/bin`. Make sure that directory is on your `PATH`. Set `DEVPROXY_INSTALL_DIR` to use another writable directory. Restart a running daemon with `devproxy stop` and `devproxy start` after updating.
 
 ## Start the proxy and daemon
 
-Run the binary to start Caddy in the same process, with its admin endpoint disabled:
+Start the shared background daemon once. It runs Caddy in the same process, with its admin endpoint disabled:
 
 ```sh
-bin/devproxy serve
+bin/devproxy start
 ```
 
-Keep it running. HTTPS listens on host loopback port 443, so stop any other local proxy using that port first. On Linux systems that restrict privileged ports, grant the built binary permission to bind port 443 before starting it:
+The command returns when Caddy and the control API are ready. The daemon continues after the terminal closes and serves all your projects. Check it with `bin/devproxy status`, stop it with `bin/devproxy stop`, or use `bin/devproxy serve` to run it in the foreground. HTTPS listens on host loopback port 443, so stop any other local proxy using that port first. On Linux systems that restrict privileged ports, grant the built binary permission to bind port 443 before starting it:
 
 ```sh
 sudo setcap cap_net_bind_service=+ep "$(realpath bin/devproxy)"
 ```
 
-If you used `just install`, apply the capability to `$(command -v devproxy)` instead of `bin/devproxy`. Reapply it after each update. The embedded mode is an evolutionary prototype; it does not install a startup service or migrate the existing Docker certificate authority.
+If you used `just install`, apply the capability to `$(command -v devproxy)` instead of `bin/devproxy`. Reapply it after each update. The embedded mode is an evolutionary prototype; it does not start automatically at login or migrate the existing Docker certificate authority.
 
 ### Use an external Caddy
 
@@ -49,14 +49,14 @@ On Docker Desktop for macOS, run:
 just serve-desktop
 ```
 
-This uses a bridge network and publishes Caddy's ports only on the host loopback address. Keep `serve` running. On Linux Docker Engine or macOS OrbStack, use host networking instead:
+This uses a bridge network and publishes Caddy's ports only on the host loopback address. Keep `serve` running, or start Caddy separately and use `bin/devproxy start --caddy-admin http://127.0.0.1:2019 --docker-desktop`. On Linux Docker Engine or macOS OrbStack, use host networking instead:
 
 ```sh
 docker compose -f caddy/compose.yml up -d
-bin/devproxy serve --caddy-admin http://127.0.0.1:2019
+bin/devproxy start --caddy-admin http://127.0.0.1:2019
 ```
 
-You can also run Caddy natively with the included `caddy/Caddyfile` and pass `--caddy-admin http://127.0.0.1:2019` to `serve`.
+You can also run Caddy natively with the included `caddy/Caddyfile` and pass `--caddy-admin http://127.0.0.1:2019` to `start`.
 
 Open `https://devproxy.localhost` for the dashboard. If your browser does not yet trust Caddy's local certificate, follow [Trust local HTTPS](#trust-local-https).
 
