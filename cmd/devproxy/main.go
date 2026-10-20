@@ -65,6 +65,9 @@ func serve(listen, admin string, dockerDesktop bool) error {
 			upstreamHost = "host.docker.internal"
 		}
 		server, err = devproxy.NewServer(admin, listen, upstreamHost)
+		if err != nil {
+			return usage(err.Error(), "devproxy serve --caddy-admin http://127.0.0.1:2019")
+		}
 	}
 	if err != nil {
 		return err
