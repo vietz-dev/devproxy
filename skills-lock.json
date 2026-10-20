@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "cli-style": {
+      "source": "spf13/cli-style",
+      "sourceType": "github",
+      "skillPath": "cli-style/SKILL.md",
+      "computedHash": "8653c009a4fe1bc121c10f9befbf8cebb73eaa0e953f56716476ba53e7b9f0c7"
+    },
     "diagram-design": {
       "source": "cathrynlavery/diagram-design",
       "sourceType": "github",
