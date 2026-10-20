@@ -13,13 +13,13 @@ This project uses `devproxy` for local HTTPS URLs. One Caddy instance handles HT
 2. Run `devproxy list --json` to get active URLs, routes, service names, local ports, registration IDs, and lease expiry as structured data. Match the project name from its script to the relevant entry. Use `devproxy list` when a human-readable table is enough. The dashboard is at `https://devproxy.localhost`.
 3. Give the user the registered HTTPS URL when you report that the project is ready. Use the URL from `devproxy list` or the wrapper's output.
 
-If `devproxy` is missing, use the project's setup instructions to install the binary. If `devproxy list` cannot reach the daemon, start `devproxy serve`; it starts embedded Caddy by default. If HTTPS shows a certificate warning, follow the setup instructions to trust Caddy's local root certificate. An existing external Caddy setup can still be used with `devproxy serve --caddy-admin http://127.0.0.1:2019`; Docker Desktop also needs `--docker-desktop`.
+If `devproxy` is missing, use the project's setup instructions to install the binary. If `devproxy list` cannot reach the daemon, run `devproxy start`; it starts embedded Caddy in the background by default and can serve every project. If HTTPS shows a certificate warning, follow the setup instructions to trust Caddy's local root certificate. An existing external Caddy setup can still be used with `devproxy start --caddy-admin http://127.0.0.1:2019`; Docker Desktop also needs `--docker-desktop`.
 
 ## CLI reference
 
 - `devproxy list` shows current registrations. A stopped service disappears when it unregisters or its registration expires.
 - `devproxy list --json` emits the same registrations as JSON for scripts and agents. Use `devproxy inspect --json ID` when you need one registration's details.
-- `devproxy serve` runs embedded Caddy, the local control server, and dashboard. Pass `--caddy-admin` only for a dedicated external Caddy instance.
+- `devproxy start` runs embedded Caddy, the local control server, and dashboard in the background. `devproxy status` checks it, and `devproxy stop` shuts it down. Pass `--caddy-admin` only for a dedicated external Caddy instance. Use `devproxy serve` for foreground operation.
 - `devproxy run --project NAME SERVICE -- COMMAND [ARGS...]` starts a command on a free port and registers it. It sets `PORT` and `DEVPROXY_URL` for the child. Use `{port}` in an argument when the command needs an explicit port. Use `--url-env VARIABLE` to set another origin variable for the child.
 - `devproxy register --project NAME --port PORT SERVICE` registers an existing service whose port is available on the host. Keep this command running while the service needs its URL.
 

@@ -108,6 +108,13 @@ func NewServer(adminURL, listen, upstreamHost string) (*Server, error) {
 }
 
 func (s *Server) Serve(ctx context.Context) error {
+	return s.ServeReady(ctx, nil)
+}
+
+// ServeReady calls ready after Caddy and the control listener are ready.
+func (s *Server) ServeReady(ctx context.Context, ready func()) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	listener, err := net.Listen("tcp", s.listen)
 	if err != nil {
 		return err
@@ -129,11 +136,27 @@ func (s *Server) Serve(ctx context.Context) error {
 	mux.HandleFunc("GET /", s.dashboard)
 	mux.Handle("GET /assets/", http.FileServerFS(dashboardFiles))
 	mux.HandleFunc("GET /v1/services", s.list)
+	mux.HandleFunc("GET /v1/daemon", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, map[string]any{"pid": os.Getpid(), "listen": s.listen})
+	})
+	mux.HandleFunc("POST /v1/daemon/stop", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Content-Type") != "application/json" {
+			http.Error(w, "Content-Type must be application/json", http.StatusUnsupportedMediaType)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		go func() {
+			<-r.Context().Done()
+			cancel()
+		}()
+	})
 	mux.HandleFunc("POST /v1/register", s.register)
 	mux.HandleFunc("POST /v1/heartbeat", s.heartbeat)
 	mux.HandleFunc("POST /v1/unregister", s.unregister)
 	server := &http.Server{Addr: s.listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -141,8 +164,12 @@ func (s *Server) Serve(ctx context.Context) error {
 	}()
 	go s.reconcile(ctx)
 	slog.Info("devproxy ready", "listen", s.listen, "dashboard", "https://devproxy.localhost")
+	if ready != nil {
+		ready()
+	}
 	err = server.Serve(listener)
 	if errors.Is(err, http.ErrServerClosed) {
+		<-shutdownDone
 		return nil
 	}
 	return err

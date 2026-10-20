@@ -74,6 +74,11 @@ func serve(listen, admin string, dockerDesktop bool) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if os.Getenv("DEVPROXY_READY_FD") == "3" {
+		ready := os.NewFile(3, "devproxy-ready")
+		defer ready.Close()
+		return server.ServeReady(ctx, func() { _, _ = ready.Write([]byte("ready\n")) })
+	}
 	return server.Serve(ctx)
 }
 

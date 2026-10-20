@@ -103,7 +103,7 @@ func TestDashboardCaddyRouteAllowsOnlyReadPaths(t *testing.T) {
 			t.Fatalf("dashboard config missing %q:\n%s", path, config)
 		}
 	}
-	for _, path := range []string{"/v1/register", "/v1/heartbeat", "/v1/unregister"} {
+	for _, path := range []string{"/v1/register", "/v1/heartbeat", "/v1/unregister", "/v1/daemon"} {
 		if strings.Contains(config, path) {
 			t.Fatalf("dashboard exposes control path %q:\n%s", path, config)
 		}
@@ -205,18 +205,20 @@ func TestEmbeddedCaddyRoutesTraffic(t *testing.T) {
 	if response.StatusCode != http.StatusOK || string(body) != "/api/ping" {
 		t.Fatalf("embedded proxy returned %d %q", response.StatusCode, body)
 	}
-	blocked, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:"+itoa(proxyPort)+"/v1/register", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	blocked.Host = "devproxy.localhost"
-	blockedResponse, err := client.Do(blocked)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = blockedResponse.Body.Close()
-	if blockedResponse.StatusCode != http.StatusNotFound {
-		t.Fatalf("public registration returned %d, want 404", blockedResponse.StatusCode)
+	for _, path := range []string{"/v1/register", "/v1/daemon/stop"} {
+		blocked, err := http.NewRequest(http.MethodPost, "https://127.0.0.1:"+itoa(proxyPort)+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		blocked.Host = "devproxy.localhost"
+		blockedResponse, err := client.Do(blocked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = blockedResponse.Body.Close()
+		if blockedResponse.StatusCode != http.StatusNotFound {
+			t.Fatalf("public %s returned %d, want 404", path, blockedResponse.StatusCode)
+		}
 	}
 }
 
