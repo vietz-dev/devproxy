@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -28,7 +29,7 @@ func newRootCommandWithConfig(fs afero.Fs) (*cobra.Command, *cliConfig) {
 	root := &cobra.Command{
 		Use:           "devproxy",
 		Short:         "Local HTTPS names for services in Git worktrees",
-		Example:       "  devproxy serve\n  devproxy run --project example web -- npm run dev\n  devproxy list --json",
+		Example:       "  devproxy start\n  devproxy run --project example web -- npm run dev\n  devproxy list --json",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -51,7 +52,7 @@ func newRootCommandWithConfig(fs afero.Fs) (*cobra.Command, *cliConfig) {
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return usage(err.Error(), cmd.CommandPath()+" --help")
 	})
-	root.AddCommand(newServeCommand(config), newRunCommand(config), newRegisterCommand(config), newListCommand(config), newInspectCommand(config))
+	root.AddCommand(newServeCommand(config), newStartCommand(config), newStopCommand(config), newStatusCommand(config), newRunCommand(config), newRegisterCommand(config), newListCommand(config), newInspectCommand(config))
 	root.AddCommand(newServicesCommand(config))
 	root.AddCommand(newVersionCommand(config))
 	root.AddCommand(newConfigCommand(config))
@@ -97,6 +98,55 @@ func newServeCommand(config *cliConfig) *cobra.Command {
 	cmd.Flags().StringVar(&admin, "caddy-admin", "", "use an external Caddy admin API instead of embedded Caddy")
 	cmd.Flags().BoolVar(&dockerDesktop, "docker-desktop", false, "connect to external Caddy in the Docker Desktop bridge setup")
 	return cmd
+}
+
+func newStartCommand(config *cliConfig) *cobra.Command {
+	cmd := &cobra.Command{
+		Use: "start", Short: "Start devproxy in the background",
+		Example: "  devproxy start\n  devproxy start --caddy-admin http://127.0.0.1:2019",
+		Args:    lifecycleNoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return startBackground(config.getString("listen"), config.getString("caddy-admin"), config.getBool("docker-desktop"), statusWriter(cmd, config))
+		},
+	}
+	cmd.Flags().String("listen", "127.0.0.1:7654", "local control and dashboard address")
+	cmd.Flags().String("caddy-admin", "", "use an external Caddy admin API instead of embedded Caddy")
+	cmd.Flags().Bool("docker-desktop", false, "connect to external Caddy in the Docker Desktop bridge setup")
+	return cmd
+}
+
+func newStopCommand(config *cliConfig) *cobra.Command {
+	return &cobra.Command{
+		Use: "stop", Short: "Stop the local devproxy daemon",
+		Args: lifecycleNoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return stopBackground(config.getString("daemon"), statusWriter(cmd, config))
+		},
+	}
+}
+
+func statusWriter(cmd *cobra.Command, config *cliConfig) io.Writer {
+	if config.getBool("quiet") {
+		return io.Discard
+	}
+	return cmd.ErrOrStderr()
+}
+
+func newStatusCommand(config *cliConfig) *cobra.Command {
+	return &cobra.Command{
+		Use: "status", Short: "Show whether the local devproxy daemon is running",
+		Args: lifecycleNoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return statusBackground(config.getString("daemon"), config.getBool("json"), cmd.OutOrStdout())
+		},
+	}
+}
+
+func lifecycleNoArgs(cmd *cobra.Command, args []string) error {
+	if len(args) != 0 {
+		return usage(cmd.Name()+" does not accept positional arguments", cmd.CommandPath()+" --help")
+	}
+	return nil
 }
 
 type serviceFlags struct {

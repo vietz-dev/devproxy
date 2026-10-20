@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,6 +56,87 @@ func listTo(args []string, out io.Writer) error {
 
 func inspectTo(args []string, out io.Writer) error {
 	return executeCommand(append([]string{"inspect"}, args...), out)
+}
+
+func TestBackgroundDaemonAcrossProjects(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "devproxy")
+	build := exec.Command("go", "build", "-o", binary, ".")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build devproxy: %v\n%s", err, output)
+	}
+	var loadedConfig string
+	var loadedMu sync.Mutex
+	admin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/load" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		loadedMu.Lock()
+		loadedConfig = string(body)
+		loadedMu.Unlock()
+	}))
+	defer admin.Close()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	listen := listener.Addr().String()
+	origin := "http://" + listen
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+	userHome := t.TempDir()
+	runCLI := func(dir string, args ...string) (string, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		command := exec.CommandContext(ctx, binary, args...)
+		command.Dir = dir
+		command.Env = append(os.Environ(), "HOME="+userHome, "XDG_CONFIG_HOME="+userHome, "XDG_CACHE_HOME="+userHome)
+		output, err := command.CombinedOutput()
+		return string(output), err
+	}
+	t.Cleanup(func() { _, _ = runCLI(projectB, "stop", "--daemon", origin) })
+	if output, err := runCLI(projectA, "start", "--listen", "127.0.0.1:0"); err == nil || !strings.Contains(output, "start must listen") {
+		t.Fatalf("start on port zero: %v\n%s", err, output)
+	}
+	if output, err := runCLI(projectA, "start", "--listen", listen, "--caddy-admin", admin.URL); err == nil || !strings.Contains(output, "failed to start") {
+		t.Fatalf("start on occupied port: %v\n%s", err, output)
+	}
+	_ = listener.Close()
+	if output, err := runCLI(projectA, "start", "--listen", listen, "--caddy-admin", "http://127.0.0.1:1"); err == nil || !strings.Contains(output, "failed to start") {
+		t.Fatalf("start without Caddy: %v\n%s", err, output)
+	}
+	t.Setenv("DEVPROXY_DOCKER_DESKTOP", "true")
+	if output, err := runCLI(projectA, "start", "--listen", listen, "--caddy-admin", admin.URL, "--docker-desktop=false"); err != nil {
+		t.Fatalf("start: %v\n%s", err, output)
+	}
+	loadedMu.Lock()
+	config := loadedConfig
+	loadedMu.Unlock()
+	if strings.Contains(config, "host.docker.internal") || !strings.Contains(config, "127.0.0.1") {
+		t.Fatalf("explicit false override was lost in child Caddy config:\n%s", config)
+	}
+	if output, err := runCLI(projectB, "start", "--listen", listen); err != nil || !strings.Contains(output, "already running") {
+		t.Fatalf("second start: %v\n%s", err, output)
+	}
+	output, err := runCLI(projectB, "status", "--daemon", origin, "--json")
+	if err != nil {
+		t.Fatalf("status from another project: %v\n%s", err, output)
+	}
+	var state daemonState
+	if err := json.Unmarshal([]byte(output), &state); err != nil || state.PID <= 0 || state.Listen != listen {
+		t.Fatalf("unexpected status %q: %v", output, err)
+	}
+	if output, err := runCLI(projectB, "stop", "--daemon", origin); err != nil {
+		t.Fatalf("stop: %v\n%s", err, output)
+	}
+	if err := syscall.Kill(state.PID, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("stop returned while process %d still exists: %v", state.PID, err)
+	}
+	if output, err := runCLI(projectA, "status", "--daemon", origin); err == nil {
+		t.Fatalf("status after stop succeeded: %s", output)
+	}
 }
 
 func TestSignalRelayReportsInterrupt(t *testing.T) {

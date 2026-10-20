@@ -3,7 +3,7 @@ title: devproxy
 description: Local HTTPS names for services running in Git worktrees.
 ---
 
-devproxy gives each Git worktree a predictable local HTTPS URL, such as `https://kasta-feature-login.localhost`. Caddy handles TLS and forwards requests inside the `devproxy serve` process by default. The daemon manages routes, while the CLI starts or registers development services. Application traffic goes through Caddy.
+devproxy gives each Git worktree a predictable local HTTPS URL, such as `https://kasta-feature-login.localhost`. Caddy handles TLS and forwards requests inside the devproxy daemon by default. The daemon manages routes, while the CLI starts or registers development services. Application traffic goes through Caddy.
 
 This is an early local development tool for macOS and Linux. Services run on the host, or in a container with their HTTP port published to the host.
 
@@ -31,7 +31,7 @@ Dashed arrows show startup and route control. The browser's application requests
 ## How it works
 
 1. Caddy owns local HTTPS and proxies requests to services on `127.0.0.1`.
-2. `devproxy serve` runs Caddy, the dashboard, and the control API on `127.0.0.1:7654`. It loads active routes through Caddy's Go API. External Caddy remains available through its local admin API.
+2. `devproxy start` launches one background process for Caddy, the dashboard, and the control API on `127.0.0.1:7654`. It loads active routes through Caddy's Go API. External Caddy remains available through its local admin API.
 3. `devproxy run` starts a development command on a free port, or `devproxy register` attaches an existing service. Both keep their registrations alive while they run.
 
 Open `https://devproxy.localhost` to see active services, or run `devproxy list`.
