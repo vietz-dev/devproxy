@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/dreifach-ai/devproxy/internal/devproxy"
+	"github.com/spf13/afero"
 )
 
 func TestMain(m *testing.M) {
@@ -32,7 +34,7 @@ func TestMain(m *testing.M) {
 }
 
 func executeCommand(args []string, out io.Writer) error {
-	root := newRootCommand()
+	root := newRootCommandWithFS(afero.NewMemMapFs())
 	root.SetArgs(args)
 	root.SetOut(out)
 	root.SetErr(io.Discard)
@@ -347,6 +349,8 @@ func TestRunRegistersAndUnregistersService(t *testing.T) {
 }
 
 func TestListAndInspectOutput(t *testing.T) {
+	t.Setenv("DEVPROXY_JSON", "")
+	t.Setenv("DEVPROXY_ROUTE", "")
 	services := []devproxy.Service{
 		{Registration: devproxy.Registration{ID: strings.Repeat("a", 32), Project: "example", Worktree: "feature", Service: "web", Route: "/", Port: 3000}, Host: "example-feature.localhost", URL: "https://example-feature.localhost", ExpiresAt: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)},
 		{Registration: devproxy.Registration{ID: strings.Repeat("b", 32), Project: "example", Worktree: "feature", Service: "api", Route: "/api", Port: 3001}, Host: "example-feature.localhost", URL: "https://example-feature.localhost", ExpiresAt: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)},
@@ -377,6 +381,13 @@ func TestListAndInspectOutput(t *testing.T) {
 	}
 	if len(listed) != 2 || listed[0].ID != services[0].ID || listed[1].Route != "/api" {
 		t.Fatalf("unexpected list JSON: %+v", listed)
+	}
+	out.Reset()
+	if err := executeCommand([]string{"services", "list", "--daemon", daemon.URL, "--json"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out.Bytes(), &listed); err != nil || len(listed) != 2 {
+		t.Fatalf("services list JSON: %v; output %q", err, out.String())
 	}
 
 	for _, target := range []string{services[1].ID, services[1].Host, services[1].URL} {
@@ -447,5 +458,229 @@ func TestListJSONEmptyArray(t *testing.T) {
 	}
 	if out.String() != "[]\n" {
 		t.Fatalf("empty list JSON = %q, want []", out.String())
+	}
+}
+
+func TestConfigPrecedenceForDaemon(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	t.Setenv("XDG_CONFIG_HOME", "/config")
+	t.Setenv("DEVPROXY_DAEMON", "")
+	if err := fs.MkdirAll("/config/devproxy", 0700); err != nil {
+		t.Fatal(err)
+	}
+	servers := make([]*httptest.Server, 4)
+	for i := range servers {
+		name := fmt.Sprintf("source-%d", i)
+		servers[i] = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode([]devproxy.Service{{Registration: devproxy.Registration{Service: name}}})
+		}))
+		defer servers[i].Close()
+	}
+	for path, value := range map[string]string{
+		"/config/devproxy/config.yaml": "daemon: " + servers[0].URL + "\n",
+		".devproxy.yaml":               "daemon: " + servers[1].URL + "\n",
+	} {
+		if err := afero.WriteFile(fs, path, []byte(value), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(args []string, want string) {
+		t.Helper()
+		var out bytes.Buffer
+		cmd := newRootCommandWithFS(fs)
+		cmd.SetArgs(append([]string{"list", "--json"}, args...))
+		cmd.SetOut(&out)
+		cmd.SetErr(io.Discard)
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("list output %q does not contain %q", out.String(), want)
+		}
+	}
+	check(nil, "source-1")
+	t.Setenv("DEVPROXY_DAEMON", servers[2].URL)
+	check(nil, "source-2")
+	check([]string{"--daemon", servers[3].URL}, "source-3")
+}
+
+func TestUsageAndLookupErrorsHaveSemanticExitCodes(t *testing.T) {
+	for _, args := range [][]string{{"run"}, {"register", "web"}, {"list", "--unknown"}} {
+		var out bytes.Buffer
+		err := executeCommand(args, &out)
+		var exit interface{ ExitCode() int }
+		if err == nil || !errors.As(err, &exit) || exit.ExitCode() != 2 {
+			t.Fatalf("%v: expected exit 2, got %v", args, err)
+		}
+	}
+	var out bytes.Buffer
+	renderCLIError(&out, notFound("missing", "devproxy list"), true)
+	if !strings.Contains(out.String(), `"exit_code":4`) || !strings.Contains(out.String(), `"run":"devproxy list"`) {
+		t.Fatalf("JSON error envelope: %q", out.String())
+	}
+}
+
+func TestQuietServiceFlagsAndConfiguredJSONErrors(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	if err := afero.WriteFile(fs, ".devproxy.yaml", []byte("json: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, config := newRootCommandWithConfig(fs)
+	root.SetArgs([]string{"serve", "--listen", "0.0.0.0:7654"})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	err := root.Execute()
+	if err == nil || !errorAsJSON(config, []string{"serve"}) {
+		t.Fatalf("configured JSON error mode: err=%v loaded=%v", err, config.loaded)
+	}
+	if wantsJSON([]string{"--json=false", "--json"}) != true || wantsJSON([]string{"--json", "--json=false"}) != false {
+		t.Fatal("last --json flag should determine error mode")
+	}
+	config.v.Set("quiet", true)
+	f := serviceFlags{project: new(string), worktree: new(string), route: new(string), daemon: new(string)}
+	f.apply(config)
+	if !f.quiet {
+		t.Fatal("--quiet did not reach the service workflow")
+	}
+}
+
+func TestBooleanEnvironmentAndConfigLoadErrorFormatting(t *testing.T) {
+	t.Setenv("DEVPROXY_JSON", "true")
+	t.Setenv("DEVPROXY_QUIET", "true")
+	if !errorAsJSON(newCLIConfig(afero.NewMemMapFs()), []string{"list", "--unknown"}) {
+		t.Fatal("DEVPROXY_JSON must format errors before command pre-run")
+	}
+	fs := afero.NewMemMapFs()
+	root, config := newRootCommandWithConfig(fs)
+	var out bytes.Buffer
+	root.SetArgs([]string{"config", "get", "json", "--origin"})
+	root.SetOut(&out)
+	root.SetErr(io.Discard)
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Value  bool   `json:"value"`
+		Origin string `json:"origin"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Value || result.Origin != "environment" || !config.getBool("quiet") {
+		t.Fatalf("boolean environment settings: %+v quiet=%v", result, config.getBool("quiet"))
+	}
+
+	t.Setenv("DEVPROXY_JSON", "")
+	t.Setenv("XDG_CONFIG_HOME", "/config")
+	if err := fs.MkdirAll("/config/devproxy", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := afero.WriteFile(fs, "/config/devproxy/config.yaml", []byte("json: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, config = newRootCommandWithConfig(fs)
+	root.SetArgs([]string{"list", "--config", "/missing.yaml"})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	if err := root.Execute(); err == nil || !errorAsJSON(config, []string{"list", "--config", "/missing.yaml"}) {
+		t.Fatalf("expected JSON mode after config load failure, got %v", err)
+	}
+	if errorAsJSON(config, []string{"list", "--config", "/missing.yaml", "--json=false"}) {
+		t.Fatal("explicit --json=false should override partial config")
+	}
+}
+
+func TestPlainListEscapesRecordDelimiters(t *testing.T) {
+	service := devproxy.Service{
+		Registration: devproxy.Registration{Service: "web\tapi\nworker\rtest", Route: "/", Port: 3000},
+		URL:          "https://example.localhost",
+	}
+	daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]devproxy.Service{service})
+	}))
+	defer daemon.Close()
+	var out bytes.Buffer
+	if err := listServicesFormatted(daemon.URL, false, true, &out); err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n"); len(lines) != 1 {
+		t.Fatalf("plain output added records: %q", out.String())
+	}
+	fields := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\t")
+	if len(fields) != 4 || fields[2] != `web\tapi\nworker\rtest` {
+		t.Fatalf("plain output fields: %q", out.String())
+	}
+}
+
+func TestFileConfiguredJSONOnEarlyFlagError(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	if err := afero.WriteFile(fs, ".devproxy.yaml", []byte("json: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	root, config := newRootCommandWithConfig(fs)
+	args := []string{"services", "describe", "--unknown"}
+	root.SetArgs(args)
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	err := root.Execute()
+	var typed *cliError
+	if !errors.As(err, &typed) || typed.run != "devproxy services describe --help" {
+		t.Fatalf("nested flag recovery command: %v", err)
+	}
+	if !errorAsJSONAfterExecution(root, config, args) {
+		t.Fatal("file-configured JSON must format early flag errors")
+	}
+}
+
+func TestExplicitJSONOnEarlyFlagError(t *testing.T) {
+	for _, args := range [][]string{
+		{"list", "--json", "--unknown"},
+		{"list", "--unknown", "--json"},
+	} {
+		root, config := newRootCommandWithConfig(afero.NewMemMapFs())
+		root.SetArgs(args)
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		if err := root.Execute(); err == nil {
+			t.Fatalf("%v: expected flag error", args)
+		}
+		if !errorAsJSONAfterExecution(root, config, args) {
+			t.Fatalf("%v: explicit --json was ignored", args)
+		}
+	}
+	for _, flag := range []string{"--json=false", "--json=FALSE", "--json=0"} {
+		root, config := newRootCommandWithConfig(afero.NewMemMapFs())
+		args := []string{"list", "--unknown", flag}
+		root.SetArgs(args)
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		if err := root.Execute(); err == nil {
+			t.Fatalf("%v: expected flag error", args)
+		}
+		if errorAsJSONAfterExecution(root, config, args) {
+			t.Fatalf("%v: false JSON flag was ignored", args)
+		}
+	}
+}
+
+func TestExplicitConfigAfterEarlyFlagError(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	if err := afero.WriteFile(fs, "custom.yaml", []byte("json: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"list", "--unknown", "--config", "custom.yaml"},
+		{"list", "--unknown", "--config=custom.yaml"},
+	} {
+		root, config := newRootCommandWithConfig(fs)
+		root.SetArgs(args)
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		if err := root.Execute(); err == nil {
+			t.Fatalf("%v: expected flag error", args)
+		}
+		if !errorAsJSONAfterExecution(root, config, args) {
+			t.Fatalf("%v: explicit config JSON was ignored", args)
+		}
 	}
 }
