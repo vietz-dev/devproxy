@@ -180,6 +180,35 @@ devproxy register --project example --route /api --port 3001 api
 seconds if their client disappears without unregistering. When the daemon
 restarts, running clients register again on their next heartbeat.
 
+## CLI configuration and output
+
+The CLI reads optional YAML settings from the user config directory at
+`devproxy/config.yaml` and from `.devproxy.yaml` in the current directory.
+`XDG_CONFIG_HOME` overrides the platform user config directory. Use
+`--config PATH` to read one additional file. For a setting such as `daemon`,
+precedence is `--daemon`, `DEVPROXY_DAEMON`, the explicit config file, the
+project file, the user file, then the built-in default. Hyphenated settings
+use underscores in environment variables, such as `DEVPROXY_CADDY_ADMIN`.
+The CLI only reads these files; it does not create them.
+
+```yaml
+# .devproxy.yaml
+project: example
+route: /
+daemon: http://127.0.0.1:7654
+```
+
+Run `devproxy config get daemon --origin` to see the effective value and its
+source. Service commands also live under `devproxy services` (`run`, `register`,
+`list`, and `describe`); the original top-level commands remain available.
+`list` and `inspect`/`describe` accept `--json`; `list --plain` emits tab-separated
+records. A piped `list` also uses tab-separated records. Status notices and
+errors go to stderr, leaving stdout for requested data and child process
+output. `--json` errors use a JSON object on stderr. Invalid command usage
+exits with code 2, missing registrations with 4, and ambiguous registrations
+with 5. An active registration indicates a renewed lease, not the health of
+its upstream service.
+
 ## Kasta example
 
 Install the binary on your `PATH`. After starting `devproxy serve`,
