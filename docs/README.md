@@ -13,4 +13,14 @@ Open <http://localhost:3000/docs>. Before publishing changes, run `npm run build
 
 Edit pages in `content/docs` and sidebar order in `content/docs/meta.json`. Do not edit `.source`; Fumadocs generates it.
 
-Configure your hosting provider with this directory as the project root and `npm run build` as the build command. Set `NEXT_PUBLIC_SITE_URL` to the deployment origin (for example, `https://docs.example.com`) so generated Open Graph links use that domain. Vercel deployments can also use their built-in `VERCEL_URL`. To use a subdomain, point it at the docs deployment; to serve docs under a main site, forward `/docs/*` to that deployment.
+## Publish on GitHub Pages
+
+The [Publish docs](../.github/workflows/docs-pages.yml) workflow builds a static site and deploys `docs/out` on pushes to `main` that change the docs or workflow. It can also be run manually. The build sets `NEXT_PUBLIC_SITE_URL` to `https://devproxy.vietz.dev` for metadata links.
+
+To finish the initial setup in the `vietz-dev/devproxy` repository:
+
+1. In **Settings → Pages**, select **GitHub Actions** as the build and deployment source. Set the custom domain to `devproxy.vietz.dev` and save it.
+2. At the DNS provider for `vietz.dev`, replace the current `devproxy` record with a `CNAME` record pointing to `vietz-dev.github.io`. Do not include the repository name in the target.
+3. Run **Publish docs** from the Actions tab or push a docs change to `main`. After the certificate is issued, enable **Enforce HTTPS** in Pages settings.
+
+The domain is configured in Pages settings, not through a `CNAME` file in this workflow's artifact. DNS changes and certificate issuance can take time to propagate.
