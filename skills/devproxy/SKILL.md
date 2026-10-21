@@ -1,6 +1,6 @@
 ---
 name: devproxy
-description: Use when starting or opening this project's local development server, finding its URL, listing active instances, or diagnosing local Caddy routing. This project uses devproxy to register development services.
+description: Use when starting or opening this project's local development server, finding its URL, discovering devproxy actions, listing active instances, or diagnosing local Caddy routing. This project uses devproxy to register development services.
 ---
 
 # devproxy in this project
@@ -17,13 +17,22 @@ If `devproxy` is missing, use the project's setup instructions to install the bi
 
 ## CLI reference
 
+When you need to discover what devproxy can do, run `devproxy --usage-spec`.
+It prints the installed binary's command tree as a KDL specification, including
+commands, aliases, flags, and positional arguments. Read the relevant `cmd`
+entry to choose an action, then run `devproxy <command> --help` for its exact
+syntax and examples. This inspection does not require the daemon. If the
+installed binary does not recognize `--usage-spec`, use `devproxy --help` and
+the command's `--help` instead. The spec does not capture every runtime rule,
+such as the required `--` before the child command in `devproxy run`.
+
 - `devproxy list` shows current registrations. A stopped service disappears when it unregisters or its registration expires.
 - `devproxy list --json` emits the same registrations as JSON for scripts and agents. Use `devproxy inspect --json ID` when you need one registration's details.
 - `devproxy start` runs embedded Caddy, the local control server, and dashboard in the background. `devproxy status` checks it, and `devproxy stop` shuts it down. Pass `--caddy-admin` only for a dedicated external Caddy instance. Use `devproxy serve` for foreground operation.
 - `devproxy run --project NAME SERVICE -- COMMAND [ARGS...]` starts a command on a free port and registers it. It sets `PORT` and `DEVPROXY_URL` for the child. Use `{port}` in an argument when the command needs an explicit port. Use `--url-env VARIABLE` to set another origin variable for the child.
 - `devproxy register --project NAME --port PORT SERVICE` registers an existing service whose port is available on the host. Keep this command running while the service needs its URL.
 
-`run` and `register` use the Git checkout folder as the default instance name. The resulting URL is `https://<project>-<folder>.localhost`. Use `--worktree NAME` before `SERVICE` when the folder name is ambiguous. Use `--route /path` before `SERVICE` to register one path prefix on a shared project URL. Read `devproxy --help` for the current command syntax.
+`run` and `register` use the Git checkout folder as the default instance name. The resulting URL is `https://<project>-<folder>.localhost`. Use `--worktree NAME` before `SERVICE` when the folder name is ambiguous. Use `--route /path` before `SERVICE` to register one path prefix on a shared project URL.
 
 The registration's lease expiry shows that the wrapper is still renewing it. It
 does not prove that the application returns successful HTTP responses. If the

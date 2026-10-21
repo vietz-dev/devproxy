@@ -31,6 +31,16 @@ install: build
 test:
     go test ./...
 
+# Export the Cobra command tree as a usage specification.
+usage-spec:
+    go run ./cmd/devproxy --usage-spec
+
+# Check the exported specification with the mise-managed usage CLI.
+usage-lint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    go run ./cmd/devproxy --usage-spec | mise exec -- usage lint -
+
 # Start Caddy in Docker Desktop bridge mode and run the daemon.
 serve-desktop: go
     docker compose -f caddy/compose.desktop.yml up -d

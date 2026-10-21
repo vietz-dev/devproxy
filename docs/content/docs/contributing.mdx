@@ -22,6 +22,23 @@ DEVPROXY_TEST_CADDY=1 go test ./...
 
 The second command also tests Caddy configuration and routing in Docker.
 
+## Inspect the CLI specification
+
+The project pins `usage` in `mise.toml`. Install it with `mise install`, then
+export or check the Cobra command specification:
+
+```sh
+just usage-spec > devproxy.usage.kdl
+just usage-lint
+mise exec -- usage generate markdown --file devproxy.usage.kdl > devproxy-cli.md
+```
+
+`devproxy --usage-spec` also prints the specification directly. The export is
+generated from Cobra's command tree; it does not capture all runtime checks,
+configuration sources, output schemas, or the required `--` before a child
+command in `run`. Keep the handwritten CLI reference and behavioral tests as
+the source for those details.
+
 ## Edit these docs
 
 The documentation app uses Node.js 22 or newer. From the repository root:

@@ -2,3 +2,4 @@
 "github:kenn-io/kata" = "latest"
 "github:kenn-io/roborev" = "latest"
 just = "latest"
+usage = "7.1.0"
