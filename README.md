@@ -59,8 +59,7 @@ npx skills add /absolute/path/to/devproxy --skill devproxy
 ```
 
 Select the agent you use when the CLI asks. The skill is installed in that
-project, so new agent sessions can use it. Once this repository is published
-at `github.com/vietz-dev/devproxy`, use
+project, so new agent sessions can use it. To install from GitHub, run
 `npx skills add vietz-dev/devproxy --skill devproxy` instead.
 
 ## Start the proxy
