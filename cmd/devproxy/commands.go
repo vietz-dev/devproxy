@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	cobra_usage "github.com/jdx/usage/integrations/cobra"
 	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -33,9 +34,15 @@ func newRootCommandWithConfig(fs afero.Fs) (*cobra.Command, *cliConfig) {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if enabled, _ := cmd.Flags().GetBool("usage-spec"); enabled {
+				_, err := io.WriteString(cmd.OutOrStdout(), cobra_usage.Generate(cmd))
+				return err
+			}
 			return cmd.Help()
 		},
 	}
+	root.Flags().Bool("usage-spec", false, "print the usage specification")
+	_ = root.Flags().MarkHidden("usage-spec")
 	root.PersistentFlags().StringVar(&config.file, "config", "", "read an additional YAML config file")
 	root.PersistentFlags().String("daemon", defaultDaemon, "devproxy daemon origin")
 	root.PersistentFlags().Bool("json", false, "emit machine-readable JSON")
@@ -68,7 +75,7 @@ func newServicesCommand(config *cliConfig) *cobra.Command {
 	for _, child := range []*cobra.Command{newRunCommand(config), newRegisterCommand(config), newListCommand(config), newInspectCommand(config)} {
 		child.Example = strings.ReplaceAll(child.Example, "devproxy "+child.Name(), "devproxy services "+child.Name())
 		if child.Name() == "inspect" {
-			child.Use = "describe [flags] ID|HOST|URL"
+			child.Use = "describe [flags] <ID|HOST|URL>"
 			child.Aliases = []string{"inspect"}
 			child.Example = strings.ReplaceAll(child.Example, "services inspect", "services describe")
 		}
@@ -184,7 +191,7 @@ func addServiceFlags(fs *pflag.FlagSet, withPort bool) serviceFlags {
 
 func newRunCommand(config *cliConfig) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "run [flags] SERVICE -- COMMAND [ARGS...]",
+		Use:     "run [flags] <SERVICE> -- <COMMAND> [ARGS]...",
 		Short:   "Run and register a service in this worktree",
 		Long:    "Run derives the worktree name from the current Git checkout, sets PORT and DEVPROXY_URL, and replaces {port} in child command arguments.",
 		Example: "  devproxy run --project example web -- npm run dev\n  devproxy run --project example --route /api api -- server --port '{port}'\n  devproxy run --project example --ready-timeout 30s web -- npm run dev",
@@ -207,7 +214,7 @@ func newRunCommand(config *cliConfig) *cobra.Command {
 
 func newRegisterCommand(config *cliConfig) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "register [flags] SERVICE",
+		Use:     "register [flags] <SERVICE>",
 		Short:   "Register an already running local service",
 		Long:    "Register derives the worktree name from the current Git checkout and renews the registration until stopped.",
 		Example: "  devproxy register --project example --port 3000 web\n  devproxy register --project example --route /api --port 3001 api",
@@ -250,7 +257,7 @@ func newListCommand(config *cliConfig) *cobra.Command {
 
 func newInspectCommand(config *cliConfig) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "inspect [flags] ID|HOST|URL",
+		Use:     "inspect [flags] <ID|HOST|URL>",
 		Short:   "Inspect one active registration",
 		Example: "  devproxy inspect example-feature.localhost\n  devproxy inspect example-feature.localhost --route /api\n  devproxy inspect example-feature.localhost --json",
 		Args: func(_ *cobra.Command, args []string) error {
@@ -296,7 +303,7 @@ func newConfigCommand(config *cliConfig) *cobra.Command {
 		Example: "  devproxy config get daemon\n  devproxy config get daemon --origin\n  devproxy config get route --json",
 	}
 	get := &cobra.Command{
-		Use:     "get KEY",
+		Use:     "get <KEY>",
 		Short:   "Get a configuration setting",
 		Example: "  devproxy config get daemon\n  devproxy config get daemon --origin\n  devproxy config get route --json",
 		Args: func(_ *cobra.Command, args []string) error {

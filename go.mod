@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/caddyserver/caddy/v2 v2.11.7
+	github.com/jdx/usage/integrations/cobra v0.0.0-20261021013239-89d1f8be6669
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
