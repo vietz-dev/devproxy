@@ -224,6 +224,53 @@ exits with code 2, missing registrations with 4, and ambiguous registrations
 with 5. An active registration indicates a renewed lease, not the health of
 its upstream service.
 
+### JSON service readiness (schema version 1)
+
+`run --json` and `register --json` (also under `services`) write exactly one
+compact JSON object followed by a newline to stdout after the local TCP port
+accepts a connection and the daemon accepts the registration. For example:
+
+```json
+{"schema_version":1,"event":"service_ready","id":"7fe98c1fc7974d55b7ebc91d8cd9a430","project":"example","worktree":"feature","service":"api","url":"https://example-feature.localhost","route":"/api","port":3001,"readiness":{"registration":"accepted","tcp":"listening","http_health":"not_checked"}}
+```
+
+- `schema_version` is an integer. Version 1 may gain fields, but existing keys,
+  types, and meanings will not change. Consumers should ignore unknown fields
+  and reject unsupported versions.
+- `event` is `service_ready`. `id` identifies this registration, not a permanent
+  service. `project`, `worktree`, and `service` give its identity. `url` is the
+  public origin (without the route); `route` is the forwarded path prefix and
+  `port` is the local upstream TCP port.
+- `readiness.registration` is `accepted`: the daemon accepted the registration.
+  `readiness.tcp` is `listening`: a local connection succeeded before registration.
+  `readiness.http_health` is `not_checked`: this is **not an HTTP health check**,
+  TLS verification, or a guarantee that the public URL can serve requests.
+  Readiness is a point-in-time observation, not continuous health monitoring.
+- Both commands **remain running** to renew the lease. Read the record as soon
+  as its newline arrives; do not wait for EOF or command completion. Keep the
+  process and its output pipe open. Shutdown removes the registration. Heartbeat
+  recovery does not emit another readiness event.
+- `--quiet` does not suppress requested JSON. Startup failures emit no readiness
+  event; errors use the existing JSON error object on stderr. A failure after
+  readiness does not retract the earlier record; monitor process exit too.
+
+Devproxy diagnostics remain on stderr. `run` also preserves the child's stdout
+and stderr unchanged. Its stdout therefore contains both child output and the
+readiness record, and child writes (including partial lines) can interleave.
+Do not treat that mixed stream as JSON or assume its first line is readiness.
+For a clean JSON stream, redirect the child's stdout inside the child command,
+not devproxy's stdout:
+
+```sh
+devproxy run --json --project example web -- sh -c 'exec npm run dev >&2'
+devproxy register --json --project example --port 3001 api
+```
+
+Read these commands incrementally from a supervised process. Avoid command
+substitution (`result=$(devproxy register ...)`) or parsers that wait for EOF;
+they will wait until the service is stopped. Without `--json`, the existing
+human readiness notice still goes to stderr and stdout remains child output.
+
 ## Kasta example
 
 Install the binary on your `PATH`. After running `devproxy start` once,

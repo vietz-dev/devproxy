@@ -22,8 +22,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/vietz-dev/devproxy/internal/devproxy"
 	"github.com/spf13/afero"
+	"github.com/vietz-dev/devproxy/internal/devproxy"
 )
 
 const defaultDaemon = "http://127.0.0.1:7654"
@@ -231,8 +231,9 @@ registrationLoop:
 	}
 	cancelAnnounce()
 	defer revoke(*f.daemon, registration.ID)
-	if !f.quiet {
-		fmt.Fprintf(os.Stderr, "devproxy: %s → %s on port %d\n", registration.Service, publicURL(registration), port)
+	if err := writeServiceReady(f, registration); err != nil {
+		_ = stopChild(cmd, done, syscall.SIGTERM)
+		return err
 	}
 	return keepAliveWithStops(*f.daemon, registration, done, signals, cmd, stopped, interrupts, terminal)
 }
@@ -429,12 +430,12 @@ func registerService(f serviceFlags, name string) error {
 		return err
 	}
 	defer revoke(*f.daemon, registration.ID)
-	if !f.quiet {
-		fmt.Fprintf(os.Stderr, "devproxy: %s → %s on port %d\n", registration.Service, publicURL(registration), registration.Port)
-	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signals)
+	if err := writeServiceReady(f, registration); err != nil {
+		return err
+	}
 	return keepAlive(*f.daemon, registration, nil, signals, nil)
 }
 

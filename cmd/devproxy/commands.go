@@ -163,6 +163,9 @@ type serviceFlags struct {
 	daemon   *string
 	port     *int
 	quiet    bool
+	asJSON   bool
+	out      io.Writer
+	errOut   io.Writer
 }
 
 func (f *serviceFlags) apply(config *cliConfig) {
@@ -171,6 +174,7 @@ func (f *serviceFlags) apply(config *cliConfig) {
 	*f.route = config.getString("route")
 	*f.daemon = config.getString("daemon")
 	f.quiet = config.getBool("quiet")
+	f.asJSON = config.getBool("json")
 	if f.port != nil {
 		*f.port = config.getInt("port")
 	}
@@ -193,7 +197,7 @@ func newRunCommand(config *cliConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "run [flags] <SERVICE> -- <COMMAND> [ARGS]...",
 		Short:   "Run and register a service in this worktree",
-		Long:    "Run derives the worktree name from the current Git checkout, sets PORT and DEVPROXY_URL, and replaces {port} in child command arguments.",
+		Long:    "Run derives the worktree name from the current Git checkout, sets PORT and DEVPROXY_URL, and replaces {port} in child command arguments. With --json, emits one readiness record on stdout after TCP listening and registration, not HTTP health. Child stdout is unchanged and shares that stream; redirect child logs for JSON-only output. Run stays active until stopped or the child exits.",
 		Example: "  devproxy run --project example web -- npm run dev\n  devproxy run --project example --route /api api -- server --port '{port}'\n  devproxy run --project example --ready-timeout 30s web -- npm run dev",
 	}
 	f := addServiceFlags(cmd.Flags(), false)
@@ -205,8 +209,9 @@ func newRunCommand(config *cliConfig) *cobra.Command {
 		}
 		return nil
 	}
-	cmd.RunE = func(_ *cobra.Command, args []string) error {
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		f.apply(config)
+		f.out, f.errOut = cmd.OutOrStdout(), cmd.ErrOrStderr()
 		return runService(f, config.v.GetDuration("ready-timeout"), config.getString("url-env"), args[0], args[1:])
 	}
 	return cmd
@@ -216,7 +221,7 @@ func newRegisterCommand(config *cliConfig) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "register [flags] <SERVICE>",
 		Short:   "Register an already running local service",
-		Long:    "Register derives the worktree name from the current Git checkout and renews the registration until stopped.",
+		Long:    "Register derives the worktree name from the current Git checkout and renews the registration until stopped. With --json, emits one readiness record on stdout after TCP listening and registration, not HTTP health. Register stays active to renew the lease; do not wait for EOF to read readiness.",
 		Example: "  devproxy register --project example --port 3000 web\n  devproxy register --project example --route /api --port 3001 api",
 		Args: func(_ *cobra.Command, args []string) error {
 			if len(args) != 1 {
@@ -226,8 +231,9 @@ func newRegisterCommand(config *cliConfig) *cobra.Command {
 		},
 	}
 	f := addServiceFlags(cmd.Flags(), true)
-	cmd.RunE = func(_ *cobra.Command, args []string) error {
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		f.apply(config)
+		f.out, f.errOut = cmd.OutOrStdout(), cmd.ErrOrStderr()
 		return registerService(f, args[0])
 	}
 	return cmd
