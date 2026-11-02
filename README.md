@@ -241,7 +241,7 @@ For compatibility, the user `config.yaml` and explicit `--config` files with
 other names may remain unversioned and retain their permissive legacy loading.
 Adding `version: 1` opts those files into the same strict schema. A version in
 one file does not supply the required version for another file. Configuration
-lookup remains limited to the current directory; it does not search parents.
+lookup uses the current Git worktree root and does not search parent directories.
 
 Run `devproxy config get daemon --origin` to see the effective value and its
 source. Service commands also live under `devproxy services` (`run`, `register`,
@@ -253,6 +253,24 @@ output. `--json` errors use a JSON object on stderr. Invalid command usage
 exits with code 2, missing registrations with 4, and ambiguous registrations
 with 5. An active registration indicates a renewed lease, not the health of
 its upstream service.
+
+`inspect` and `services describe` match an **exact** registration ID, hostname,
+or origin URL, such as `https://example-feature.localhost` (no path or trailing
+slash). Use `--route /api` to select a path registration. If a host or URL is
+ambiguous, the error lists the competing IDs, hosts, and routes, sorted by ID,
+and suggests an `inspect` command using one actual ID. A missing route shows
+the registrations available for the same lookup; other missing lookups explain
+the accepted forms. `devproxy list --json` provides all current IDs and routes.
+
+Selection errors preserve the existing JSON schema on stderr, with empty stdout:
+`{"error":{"code":"CONFLICT","exit_code":5,"message":"...","run":"...","retryable":false}}`.
+Missing selections use `NOT_FOUND` and exit code 4. The keys and types are
+unchanged; `message` now includes corrective context and is human-readable text,
+not a parsing contract. `run` is a shell command using an actual matching ID for
+ambiguity, or `list --json` for missing selections. Corrections explicitly retain
+the selected daemon and, for ambiguity, the chosen route, overriding defaults
+from configuration or environment variables.
+Scripts should branch on `code`/`exit_code`, not parse `message`.
 
 ### JSON service readiness (schema version 1)
 
