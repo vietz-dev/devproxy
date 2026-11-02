@@ -644,16 +644,30 @@ func inspectService(daemon string, asJSON bool, route, query string, out io.Writ
 		return err
 	}
 	var matches []devproxy.Service
+	var available []devproxy.Service
 	for _, service := range services {
-		if (service.ID == query || service.Host == query || service.URL == query) && (route == "" || service.Route == route) {
-			matches = append(matches, service)
+		if service.ID == query || service.Host == query || service.URL == query {
+			available = append(available, service)
+			if route == "" || service.Route == route {
+				matches = append(matches, service)
+			}
 		}
 	}
 	if len(matches) == 0 {
-		return notFound(fmt.Sprintf("no active registration matches %q", query), "devproxy list")
+		message := fmt.Sprintf("no active registration matches %q", query)
+		if route != "" {
+			message += fmt.Sprintf(" with route %q", route)
+		}
+		message += "; use an exact registration ID, hostname (example-feature.localhost), or origin URL (https://example-feature.localhost); select a path with --route /api, not a URL path"
+		if len(available) > 0 {
+			message += "\nAvailable registrations for this lookup:" + selectionDetails(available)
+		}
+		return notFound(message, selectionCommand(daemon, "list", "--json"))
 	}
 	if len(matches) > 1 {
-		return conflict(fmt.Sprintf("%q matches %d registrations; pass --route or use a registration ID", query, len(matches)), "devproxy inspect --route /api "+query)
+		message := fmt.Sprintf("%q matches %d registrations; use an exact registration ID or pass --route with one of the routes below", query, len(matches))
+		message += "\nCompeting registrations:" + selectionDetails(matches)
+		return conflict(message, selectionCommand(daemon, "inspect", "--route", matches[0].Route, "--", matches[0].ID))
 	}
 	service := matches[0]
 	if asJSON {
