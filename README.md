@@ -204,10 +204,40 @@ The CLI only reads these files; it does not create them.
 
 ```yaml
 # .devproxy.yaml
+version: 1
 project: example
 route: /
 daemon: http://127.0.0.1:7654
 ```
+
+### Project configuration schema (version 1)
+
+Every `.devproxy.yaml`, including one supplied with `--config`, must declare
+the integer `version: 1`. To migrate an existing project file, add that line,
+remove unknown settings, and use the types below. No automatic rewrite occurs.
+The file is a single, flat YAML mapping; keys are case-sensitive. Nested
+settings, aliases, merge keys, duplicate keys, and additional YAML documents
+are not supported.
+
+| Type | Optional settings |
+| --- | --- |
+| String | `project`, `worktree`, `route`, `daemon`, `listen`, `caddy-admin`, `url-env` |
+| Duration string (for example `30s` or `1m`) | `ready-timeout` |
+| Integer | `port` |
+| Boolean (`true` or `false`) | `docker-desktop`, `json`, `plain`, `quiet`, `no-color`, `no-input` |
+
+Omitted settings retain the precedence above; `version` is file metadata, not
+an overridable CLI setting. Unknown keys, wrong types (including null), and
+unsupported versions fail before service operations, even when a higher-priority
+source overrides the invalid setting. Errors name the file and correction.
+Quote numeric-looking string values; write booleans and integers without quotes.
+Command-specific value checks, such as valid ports and routes, still apply.
+
+For compatibility, the user `config.yaml` and explicit `--config` files with
+other names may remain unversioned and retain their permissive legacy loading.
+Adding `version: 1` opts those files into the same strict schema. A version in
+one file does not supply the required version for another file. Configuration
+lookup remains limited to the current directory; it does not search parents.
 
 Run `devproxy config get daemon --origin` to see the effective value and its
 source. Service commands also live under `devproxy services` (`run`, `register`,

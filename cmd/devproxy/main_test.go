@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vietz-dev/devproxy/internal/devproxy"
 	"github.com/spf13/afero"
+	"github.com/vietz-dev/devproxy/internal/devproxy"
 )
 
 func TestMain(m *testing.M) {
@@ -560,7 +560,7 @@ func TestConfigPrecedenceForDaemon(t *testing.T) {
 	}
 	for path, value := range map[string]string{
 		"/config/devproxy/config.yaml": "daemon: " + servers[0].URL + "\n",
-		".devproxy.yaml":               "daemon: " + servers[1].URL + "\n",
+		".devproxy.yaml":               "version: 1\ndaemon: " + servers[1].URL + "\n",
 	} {
 		if err := afero.WriteFile(fs, path, []byte(value), 0600); err != nil {
 			t.Fatal(err)
@@ -612,7 +612,7 @@ func TestInvalidCaddyAdminURLIsUsageError(t *testing.T) {
 
 func TestQuietServiceFlagsAndConfiguredJSONErrors(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	if err := afero.WriteFile(fs, ".devproxy.yaml", []byte("json: true\n"), 0600); err != nil {
+	if err := afero.WriteFile(fs, ".devproxy.yaml", []byte("version: 1\njson: true\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	root, config := newRootCommandWithConfig(fs)
@@ -704,7 +704,7 @@ func TestPlainListEscapesRecordDelimiters(t *testing.T) {
 
 func TestFileConfiguredJSONOnEarlyFlagError(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	if err := afero.WriteFile(fs, ".devproxy.yaml", []byte("json: true\n"), 0600); err != nil {
+	if err := afero.WriteFile(fs, ".devproxy.yaml", []byte("version: 1\njson: true\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	root, config := newRootCommandWithConfig(fs)

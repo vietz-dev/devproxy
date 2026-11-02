@@ -83,6 +83,9 @@ func (c *cliConfig) mergeFile(path string, required bool) error {
 	if err != nil {
 		return fmt.Errorf("read config %s: %w", path, err)
 	}
+	if err := validateConfig(data, filepath.Base(path) == ".devproxy.yaml"); err != nil {
+		return fmt.Errorf("invalid config %s: %w", path, err)
+	}
 	c.v.SetConfigType("yaml")
 	source := viper.New()
 	source.SetConfigType("yaml")
