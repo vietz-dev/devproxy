@@ -544,6 +544,7 @@ func TestListJSONEmptyArray(t *testing.T) {
 }
 
 func TestConfigPrecedenceForDaemon(t *testing.T) {
+	t.Chdir(t.TempDir())
 	fs := afero.NewMemMapFs()
 	t.Setenv("XDG_CONFIG_HOME", "/config")
 	t.Setenv("DEVPROXY_DAEMON", "")
@@ -611,6 +612,7 @@ func TestInvalidCaddyAdminURLIsUsageError(t *testing.T) {
 }
 
 func TestQuietServiceFlagsAndConfiguredJSONErrors(t *testing.T) {
+	t.Chdir(t.TempDir())
 	fs := afero.NewMemMapFs()
 	if err := afero.WriteFile(fs, ".devproxy.yaml", []byte("json: true\n"), 0600); err != nil {
 		t.Fatal(err)
@@ -703,6 +705,7 @@ func TestPlainListEscapesRecordDelimiters(t *testing.T) {
 }
 
 func TestFileConfiguredJSONOnEarlyFlagError(t *testing.T) {
+	t.Chdir(t.TempDir())
 	fs := afero.NewMemMapFs()
 	if err := afero.WriteFile(fs, ".devproxy.yaml", []byte("json: true\n"), 0600); err != nil {
 		t.Fatal(err)

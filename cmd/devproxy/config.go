@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -57,7 +58,7 @@ func (c *cliConfig) load(cmd *cobra.Command) error {
 	if err := c.mergeFile(filepath.Join(configHome, "devproxy", "config.yaml"), false); err != nil {
 		return err
 	}
-	if err := c.mergeFile(".devproxy.yaml", false); err != nil {
+	if err := c.mergeFile(projectConfigPath(), false); err != nil {
 		return err
 	}
 	if c.file != "" {
@@ -73,6 +74,18 @@ func (c *cliConfig) load(cmd *cobra.Command) error {
 	}
 	c.loaded = true
 	return nil
+}
+
+// projectConfigPath selects only the current worktree's project file. Outside
+// Git (or without Git installed), preserve current-directory-only discovery.
+func projectConfigPath() string {
+	output, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err == nil {
+		if root := strings.TrimSpace(string(output)); root != "" {
+			return filepath.Join(root, ".devproxy.yaml")
+		}
+	}
+	return ".devproxy.yaml"
 }
 
 func (c *cliConfig) mergeFile(path string, required bool) error {

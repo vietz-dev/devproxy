@@ -194,9 +194,13 @@ restarts, running clients register again on their next heartbeat.
 ## CLI configuration and output
 
 The CLI reads optional YAML settings from the user config directory at
-`devproxy/config.yaml` and from `.devproxy.yaml` in the current directory.
+`devproxy/config.yaml` and from `.devproxy.yaml` at the current Git worktree's
+root, including when invoked from a nested directory. Nested project files are
+not merged. Outside Git, or if Git is unavailable, only `.devproxy.yaml` in the
+current directory is used; parent directories are not searched.
 `XDG_CONFIG_HOME` overrides the platform user config directory. Use
-`--config PATH` to read one additional file. For a setting such as `daemon`,
+`--config PATH` to read one additional file (relative paths stay relative to the
+current directory, and a missing explicit file is an error). For a setting such as `daemon`,
 precedence is `--daemon`, `DEVPROXY_DAEMON`, the explicit config file, the
 project file, the user file, then the built-in default. Hyphenated settings
 use underscores in environment variables, such as `DEVPROXY_CADDY_ADMIN`.
