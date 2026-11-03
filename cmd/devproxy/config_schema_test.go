@@ -9,6 +9,8 @@ import (
 )
 
 func TestProjectConfigValidation(t *testing.T) {
+	configTestEnvironment(t)
+	t.Chdir(t.TempDir())
 	tests := []struct{ name, yaml, want string }{
 		{"missing version", "project: example\n", "add version: 1"},
 		{"empty", "", "version: 1"},
@@ -74,6 +76,8 @@ func TestConfigSchemaCompatibility(t *testing.T) {
 }
 
 func TestVersionedConfigPrecedenceAndOrigins(t *testing.T) {
+	configTestEnvironment(t)
+	t.Chdir(t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", "/config")
 	t.Setenv("DEVPROXY_PROJECT", "")
 	fs := afero.NewMemMapFs()

@@ -71,7 +71,7 @@ func TestProjectConfigWorktreeDiscovery(t *testing.T) {
 		// Use Git's canonical path for --origin (macOS temp paths use symlinks).
 		root = configTestGit(t, root, "rev-parse", "--show-toplevel")
 		projectFile := filepath.Join(root, ".devproxy.yaml")
-		writeConfigTestFile(t, projectFile, fmt.Sprintf("project: %q\n", filepath.Base(root)))
+		writeConfigTestFile(t, projectFile, fmt.Sprintf("version: 1\nproject: %q\n", filepath.Base(root)))
 		nested := filepath.Join(root, "packages", "web")
 		writeConfigTestFile(t, filepath.Join(nested, ".devproxy.yaml"), "project: ignored\n")
 		for _, dir := range []string{root, nested} {
@@ -110,7 +110,7 @@ func TestProjectConfigOutsideGit(t *testing.T) {
 	if err != nil || got != "\tdefault\n" {
 		t.Fatalf("outside Git must not search ancestors: %q, %v", got, err)
 	}
-	writeConfigTestFile(t, ".devproxy.yaml", "project: local\n")
+	writeConfigTestFile(t, ".devproxy.yaml", "version: 1\nproject: local\n")
 	for _, noGit := range []bool{false, true} {
 		t.Run(fmt.Sprintf("git-unavailable=%t", noGit), func(t *testing.T) {
 			if noGit {
@@ -146,7 +146,7 @@ func TestWorktreeConfigPrecedenceAndExplicitPath(t *testing.T) {
 	writeConfigTestFile(t, user, "daemon: http://user.localhost\n")
 	check("http://user.localhost\t" + user + "\n")
 	project := filepath.Join(repo, ".devproxy.yaml")
-	writeConfigTestFile(t, project, "daemon: http://project.localhost\nproject: configured\nworktree: configured\n")
+	writeConfigTestFile(t, project, "version: 1\ndaemon: http://project.localhost\nproject: configured\nworktree: configured\n")
 	check("http://project.localhost\t" + project + "\n")
 	writeConfigTestFile(t, filepath.Join(repo, "custom.yaml"), "daemon: http://wrong.localhost\n")
 	writeConfigTestFile(t, "custom.yaml", "daemon: http://explicit.localhost\n")
